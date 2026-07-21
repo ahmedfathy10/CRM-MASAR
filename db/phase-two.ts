@@ -9,7 +9,7 @@ const leadFields = [
   ["secondaryPhone", "رقم الموبايل 2", "tel", "رقم بديل بكود الدولة", 0, 1, 3, "full", "[]"],
   ["source", "المصدر", "select", "اختر المصدر", 1, 1, 4, "full", '["Facebook Call","Whatsapp Call","TikTok Call","Instagram Call","Google Call","Recommendation Call"]'],
   ["course", "الكورس", "select", "اختر الكورس", 1, 1, 5, "full", '["English Course","German Course","Programming Course","Business Course","Other"]'],
-  ["branch", "الفرع", "select", "اختر الفرع", 1, 1, 6, "full", '["Maadi","Nasr City","New Cairo","Alexandria","Online"]'],
+  ["branchId", "الفرع", "select", "اختر الفرع", 1, 1, 6, "full", "[]"],
   ["notes", "ملاحظات", "textarea", "اكتب الملاحظات", 0, 1, 7, "full", "[]"],
 ];
 
@@ -34,8 +34,9 @@ const callFields = [
   ["direction", "نوع المكالمة", "select", "اختر النوع", 1, 1, 2, "half", '["صادرة","واردة"]'],
   ["result", "نتيجة المكالمة", "select", "اختر النتيجة", 1, 1, 3, "half", '["تم الرد","لم يرد","مشغول","رقم خاطئ","طلب معاودة الاتصال"]'],
   ["assignedEmployeeId", "الموظف المسؤول", "select", "اختر الموظف", 1, 1, 4, "half", "[]"],
-  ["callAt", "وقت المكالمة", "datetime-local", "", 1, 1, 5, "full", "[]"],
-  ["notes", "ملاحظات المكالمة", "textarea", "اكتب ملخص المكالمة", 0, 1, 6, "full", "[]"],
+  ["branchId", "الفرع", "select", "اختر الفرع", 1, 1, 5, "half", "[]"],
+  ["callAt", "وقت المكالمة", "datetime-local", "", 1, 1, 6, "full", "[]"],
+  ["notes", "ملاحظات المكالمة", "textarea", "اكتب ملخص المكالمة", 0, 1, 7, "full", "[]"],
 ];
 
 export async function ensurePhaseTwo() {
@@ -53,6 +54,12 @@ async function initialize() {
     db.prepare("CREATE INDEX IF NOT EXISTS calls_lead_idx ON call_records (lead_id, call_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS leads_assignee_idx ON leads (assigned_employee_id, status)"),
   ]);
+  const leadColumns = await db.prepare("PRAGMA table_info(leads)").all<{ name: string }>();
+  if (!leadColumns.results.some((column) => column.name === "branch_id")) await db.prepare("ALTER TABLE leads ADD COLUMN branch_id INTEGER REFERENCES branches(id)").run();
+  const callColumns = await db.prepare("PRAGMA table_info(call_records)").all<{ name: string }>();
+  if (!callColumns.results.some((column) => column.name === "branch_id")) await db.prepare("ALTER TABLE call_records ADD COLUMN branch_id INTEGER REFERENCES branches(id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS leads_branch_idx ON leads (branch_id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS calls_branch_idx ON call_records (branch_id)").run();
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('lead', 'بيانات العميل المحتمل', 'الحقول المستخدمة عند تسجيل Lead جديدة')"),
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('call', 'بيانات المكالمة', 'الحقول المستخدمة عند تسجيل مكالمة')"),
@@ -60,7 +67,7 @@ async function initialize() {
   ]);
   const forms = await db.prepare("SELECT id, form_key AS formKey FROM form_definitions WHERE form_key IN ('lead','call','lead_details')").all<{ id: number; formKey: string }>();
   const leadForm = forms.results.find((form) => form.formKey === "lead");
-  if (leadForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key NOT IN ('fullName','primaryPhone','secondaryPhone','source','course','branch','notes')").bind(leadForm.id).run();
+  if (leadForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key NOT IN ('fullName','primaryPhone','secondaryPhone','source','course','branchId','notes')").bind(leadForm.id).run();
   const query = `INSERT INTO form_fields (form_id, field_key, label, type, placeholder, required, visible, sort_order, width, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(form_id, field_key) DO UPDATE SET label=excluded.label, type=excluded.type, placeholder=excluded.placeholder, sort_order=excluded.sort_order, width=excluded.width, options_json=excluded.options_json`;
   const batches = forms.results.flatMap((form) => (form.formKey === "lead" ? leadFields : form.formKey === "call" ? callFields : leadDetailsFields).map((field) => db.prepare(query).bind(form.id, ...field)));
   if (batches.length) await db.batch(batches);

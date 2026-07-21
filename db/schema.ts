@@ -33,6 +33,18 @@ export const rolePermissions = sqliteTable("role_permissions", {
   allowed: integer("allowed", { mode: "boolean" }).notNull().default(false),
 });
 
+export const branches = sqliteTable("branches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  address: text("address").notNull().default(""),
+  primaryPhone: text("primary_phone").notNull().default(""),
+  secondaryPhone: text("secondary_phone").notNull().default(""),
+  email: text("email").notNull().default(""),
+  socialUrl: text("social_url").notNull().default(""),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const employees = sqliteTable("employees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fullName: text("full_name").notNull(),
@@ -41,6 +53,7 @@ export const employees = sqliteTable("employees", {
   departmentId: integer("department_id").references(() => departments.id),
   jobTitleId: integer("job_title_id").references(() => jobTitles.id),
   roleId: integer("role_id").references(() => roles.id),
+  branchId: integer("branch_id").references(() => branches.id),
   status: text("status", { enum: ["active", "invited", "disabled"] })
     .notNull()
     .default("invited"),
@@ -82,6 +95,7 @@ export const leads = sqliteTable("leads", {
   campaign: text("campaign").notNull().default(""),
   interest: text("interest").notNull().default(""),
   assignedEmployeeId: integer("assigned_employee_id").references(() => employees.id),
+  branchId: integer("branch_id").references(() => branches.id),
   status: text("status").notNull().default("new"),
   priority: text("priority").notNull().default("normal"),
   notes: text("notes").notNull().default(""),
@@ -97,6 +111,7 @@ export const callRecords = sqliteTable("call_records", {
   direction: text("direction").notNull().default("outgoing"),
   result: text("result").notNull().default("no_answer"),
   assignedEmployeeId: integer("assigned_employee_id").references(() => employees.id),
+  branchId: integer("branch_id").references(() => branches.id),
   callAt: text("call_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   notes: text("notes").notNull().default(""),
   customData: text("custom_data").notNull().default("{}"),
