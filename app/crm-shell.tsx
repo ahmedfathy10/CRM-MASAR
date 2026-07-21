@@ -10,13 +10,13 @@ type Field = { id: number; fieldKey: string; label: string; type: string; placeh
 type Lead = { id: number; fullName: string; primaryPhone: string; secondaryPhone: string; email: string; source: string; campaign: string; interest: string; status: string; priority: string; notes: string; assignedEmployeeId: number; assignedEmployee: string; callCount: number; createdAt: string };
 type CallRecord = { id: number; leadId: number | null; phone: string; direction: string; result: string; assignedEmployeeId: number; assignedEmployee: string; leadName: string | null; callAt: string; notes: string };
 type Setup = { departments: Department[]; jobTitles: JobTitle[]; roles: Role[]; employees: Employee[]; fields: Field[]; leads: Lead[]; calls: CallRecord[]; leadFields: Field[]; callFields: Field[] };
-type Tab = "overview" | "departments" | "jobs" | "employees" | "leaves" | "permissions" | "forms" | "leads" | "calls";
+type Tab = "overview" | "departments" | "jobs" | "employees" | "leaves" | "permissions" | "forms" | "leads" | "inboundCalls" | "callCenterCalls";
 type Dialog = "employee" | "department" | "job" | "field" | "lead" | "call" | null;
 
 const emptySetup: Setup = { departments: [], jobTitles: [], roles: [], employees: [], fields: [], leads: [], calls: [], leadFields: [], callFields: [] };
 const titles: Record<Tab, [string, string]> = {
   overview: ["إدارة الموارد البشرية", "هيكل الشركة والموظفون في مكان واحد"], departments: ["أقسام الشركة", "الأقسام الرئيسية والفرعية التي تظهر في نموذج الموظف"], jobs: ["الأدوار الوظيفية", "كل قسم وتحته الوظائف المتاحة داخله"], employees: ["الموظفون", "بيانات الموظفين وحساباتهم على النظام"], leaves: ["الإجازات", "أنواع الإجازات وسياسات الاستحقاق"], permissions: ["الصلاحيات", "صلاحيات الصفحات والإجراءات لكل مجموعة"], forms: ["مصمم النماذج", "تحكم كامل في حقول إدخال بيانات الموظف"],
-  leads: ["العملاء المحتملون", "تسجيل وتوزيع الـLeads ومتابعة حالتها الأولية"], calls: ["سجل المكالمات", "تسجيل مكالمة جديدة وربطها تلقائيًا بالعميل"],
+  leads: ["العملاء المحتملون", "تسجيل وتوزيع الـLeads ومتابعة حالتها الأولية"], inboundCalls: ["المكالمات الواردة", "المكالمات التي استقبلها فريق خدمة العملاء"], callCenterCalls: ["مكالمات الكول سنتر", "سجل المكالمات الواردة والصادرة وربطها بالعملاء"],
 };
 
 export function CrmShell() {
@@ -41,15 +41,24 @@ export function CrmShell() {
         <NavItem active={tab === "permissions"} icon="⌾" label="الصلاحيات" onClick={() => setTab("permissions")} />
         <NavItem active={tab === "forms"} icon="▤" label="مصمم النماذج" onClick={() => setTab("forms")} />
         <div className="nav-separator" />
-        <button className={`nav-group sales ${tab === "leads" || tab === "calls" ? "active" : ""}`} onClick={() => setTab("leads")}><span className="nav-icon">◇</span><span><strong>العملاء والمبيعات</strong><small>Leads & Calls</small></span><b>⌄</b></button>
-        <div className="subnav"><SubNav label="العملاء المحتملون" active={tab === "leads"} onClick={() => setTab("leads")} /><SubNav label="سجل المكالمات" active={tab === "calls"} onClick={() => setTab("calls")} /></div>
-        <NavItem disabled icon="◷" label="المتابعات" badge="المرحلة 3" /><NavItem disabled icon="◫" label="المدفوعات" badge="المرحلة 4" /><NavItem disabled icon="◎" label="الجروبات" badge="المرحلة 5" />
+        <button className={`nav-group sales ${tab === "leads" || tab === "inboundCalls" || tab === "callCenterCalls" ? "active" : ""}`} onClick={() => setTab("leads")}><span className="nav-icon">▣</span><span><strong>Customer Care</strong><small>خدمة العملاء والمبيعات</small></span><b>⌄</b></button>
+        <div className="subnav customer-care-menu">
+          <SubNav label="Leads" active={tab === "leads"} onClick={() => setTab("leads")} />
+          <SubNav label="Inbound Calls" active={tab === "inboundCalls"} onClick={() => setTab("inboundCalls")} />
+          <SubNav label="Leads Followup" disabled badge="3" />
+          <SubNav label="Received Followup" disabled badge="3" />
+          <SubNav label="Call Center Calls" active={tab === "callCenterCalls"} onClick={() => setTab("callCenterCalls")} />
+          <SubNav label="Support Tickets" disabled />
+          <SubNav label="Recommendation" disabled />
+          <SubNav label="Chat Boxes" disabled />
+        </div>
+        <NavItem disabled icon="◫" label="المدفوعات" badge="المرحلة 4" /><NavItem disabled icon="◎" label="الجروبات" badge="المرحلة 5" />
       </nav>
       <div className="phase-card"><span>المرحلة الحالية</span><strong>02 — العملاء والمكالمات</strong><div className="progress phase-two"><i /></div><small>تسجيل العميل، منع التكرار وتوزيع المسؤولية</small></div>
       <div className="profile"><span className="avatar">أم</span><div><strong>أحمد منصور</strong><small>مدير النظام</small></div><button>•••</button></div>
     </aside>
     <section className="workspace">
-      <header className="topbar"><div><span className="eyebrow">مسار CRM <b>/</b> {tab === "leads" || tab === "calls" ? "العملاء والمبيعات" : "الموارد البشرية"}</span><h1>{title}</h1><p className="page-subtitle">{subtitle}</p></div><div className="top-actions"><button className="icon-button">♢<i /></button>{tab === "departments" && <button className="primary" onClick={() => setDialog("department")}>＋ إضافة قسم</button>}{tab === "jobs" && <button className="primary" onClick={() => setDialog("job")}>＋ إضافة وظيفة</button>}{tab === "employees" && <button className="primary" onClick={() => setDialog("employee")}>＋ إضافة موظف</button>}{tab === "forms" && <button className="primary" onClick={() => setDialog("field")}>＋ إضافة حقل</button>}{tab === "leads" && <button className="primary" onClick={() => setDialog("lead")}>＋ تسجيل Lead</button>}{tab === "calls" && <button className="primary" onClick={() => setDialog("call")}>＋ تسجيل مكالمة</button>}</div></header>
+      <header className="topbar"><div><span className="eyebrow">مسار CRM <b>/</b> {tab === "leads" || tab === "inboundCalls" || tab === "callCenterCalls" ? "Customer Care" : "الموارد البشرية"}</span><h1>{title}</h1><p className="page-subtitle">{subtitle}</p></div><div className="top-actions"><button className="icon-button">♢<i /></button>{tab === "departments" && <button className="primary" onClick={() => setDialog("department")}>＋ إضافة قسم</button>}{tab === "jobs" && <button className="primary" onClick={() => setDialog("job")}>＋ إضافة وظيفة</button>}{tab === "employees" && <button className="primary" onClick={() => setDialog("employee")}>＋ إضافة موظف</button>}{tab === "forms" && <button className="primary" onClick={() => setDialog("field")}>＋ إضافة حقل</button>}{tab === "leads" && <button className="primary" onClick={() => setDialog("lead")}>＋ تسجيل Lead</button>}{(tab === "inboundCalls" || tab === "callCenterCalls") && <button className="primary" onClick={() => setDialog("call")}>＋ تسجيل مكالمة</button>}</div></header>
       {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
       {loading ? <Loading /> : <Page tab={tab} data={data} mutate={mutate} open={setDialog} setNotice={setNotice} />}
     </section>
@@ -70,11 +79,12 @@ function Page({ tab, data, mutate, open, setNotice }: { tab: Tab; data: Setup; m
   if (tab === "leaves") return <Leaves />;
   if (tab === "permissions") return <Permissions roles={data.roles} />;
   if (tab === "leads") return <LeadsPage data={data} addLead={() => open("lead")} addCall={() => open("call")} />;
-  if (tab === "calls") return <CallsPage data={data} add={() => open("call")} />;
+  if (tab === "inboundCalls") return <CallsPage data={data} add={() => open("call")} mode="incoming" />;
+  if (tab === "callCenterCalls") return <CallsPage data={data} add={() => open("call")} mode="all" />;
   return <FormBuilder fields={data.fields} data={data} mutate={mutate} onAdd={() => open("field")} />;
 }
 
-function SubNav({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) { return <button className={active ? "active" : ""} onClick={onClick}><i />{label}</button>; }
+function SubNav({ label, active=false, disabled=false, badge, onClick }: { label: string; active?: boolean; disabled?: boolean; badge?: string; onClick?: () => void }) { return <button className={`${active ? "active" : ""} ${disabled ? "disabled" : ""}`} onClick={onClick} disabled={disabled}><i /><span>{label}</span>{badge && <em>{badge}</em>}</button>; }
 function NavItem({ active, disabled, icon, label, badge, onClick }: { active?: boolean; disabled?: boolean; icon: string; label: string; badge?: string; onClick?: () => void }) { return <button className={`nav-item ${active ? "active" : ""} ${disabled ? "disabled" : ""}`} onClick={onClick} disabled={disabled}><span className="nav-icon">{icon}</span><span>{label}</span>{badge && <em>{badge}</em>}</button>; }
 function Loading() { return <div className="loading-grid"><div /><div /><div /><article /></div>; }
 
@@ -119,10 +129,12 @@ function LeadsPage({ data, addLead, addCall }: { data: Setup; addLead: () => voi
   </div>;
 }
 
-function CallsPage({ data, add }: { data: Setup; add: () => void }) {
-  const answered = data.calls.filter((call) => call.result === "answered").length;
-  const linked = data.calls.filter((call) => call.leadId).length;
-  return <div className="content-stack"><section className="metrics"><Metric label="إجمالي المكالمات" value={data.calls.length} hint="كل المكالمات المسجلة" tone="green" /><Metric label="تم الرد" value={answered} hint="مكالمات مكتملة" tone="blue" /><Metric label="مرتبطة بعميل" value={linked} hint="تم التعرف على الرقم" tone="orange" /><Metric label="أرقام جديدة" value={data.calls.length - linked} hint="غير مرتبطة بـLead" tone="purple" /></section><section className="panel"><div className="panel-head"><div><h2>سجل المكالمات</h2><p>يتم البحث عن رقم الهاتف وربطه تلقائيًا بعميل موجود.</p></div><button className="primary" onClick={add}>＋ تسجيل مكالمة</button></div>{data.calls.length ? <div className="table-wrap"><table><thead><tr><th>العميل / الرقم</th><th>نوع المكالمة</th><th>النتيجة</th><th>الموظف المسؤول</th><th>التوقيت</th><th>الملاحظات</th></tr></thead><tbody>{data.calls.map((call) => <tr key={call.id}><td><div className="call-identity"><strong>{call.leadName || "رقم غير مسجل"}</strong><small>{call.phone}</small></div></td><td><span className={`direction ${call.direction}`}>{call.direction === "incoming" ? "↙ واردة" : "↗ صادرة"}</span></td><td><CallResult value={call.result} /></td><td>{call.assignedEmployee || "غير معيّن"}</td><td>{formatDate(call.callAt)}</td><td className="notes-cell">{call.notes || "—"}</td></tr>)}</tbody></table></div> : <div className="empty"><span>☎</span><h3>لا توجد مكالمات مسجلة</h3><p>سجل مكالمة واردة أو صادرة، وسيتم ربطها بالـLead تلقائيًا.</p><button className="primary" onClick={add}>＋ تسجيل مكالمة</button></div>}</section></div>;
+function CallsPage({ data, add, mode }: { data: Setup; add: () => void; mode: "incoming" | "all" }) {
+  const calls = mode === "incoming" ? data.calls.filter((call) => call.direction === "incoming") : data.calls;
+  const answered = calls.filter((call) => call.result === "answered").length;
+  const linked = calls.filter((call) => call.leadId).length;
+  const heading = mode === "incoming" ? "Inbound Calls" : "Call Center Calls";
+  return <div className="content-stack"><section className="metrics"><Metric label="إجمالي المكالمات" value={calls.length} hint={mode === "incoming" ? "مكالمات واردة" : "كل المكالمات المسجلة"} tone="green" /><Metric label="تم الرد" value={answered} hint="مكالمات مكتملة" tone="blue" /><Metric label="مرتبطة بعميل" value={linked} hint="تم التعرف على الرقم" tone="orange" /><Metric label="أرقام جديدة" value={calls.length - linked} hint="غير مرتبطة بـLead" tone="purple" /></section><section className="panel"><div className="panel-head"><div><h2>{heading}</h2><p>يتم البحث عن رقم الهاتف وربطه تلقائيًا بعميل موجود.</p></div><button className="primary" onClick={add}>＋ تسجيل مكالمة</button></div>{calls.length ? <div className="table-wrap"><table><thead><tr><th>العميل / الرقم</th><th>نوع المكالمة</th><th>النتيجة</th><th>الموظف المسؤول</th><th>التوقيت</th><th>الملاحظات</th></tr></thead><tbody>{calls.map((call) => <tr key={call.id}><td><div className="call-identity"><strong>{call.leadName || "رقم غير مسجل"}</strong><small>{call.phone}</small></div></td><td><span className={`direction ${call.direction}`}>{call.direction === "incoming" ? "↙ واردة" : "↗ صادرة"}</span></td><td><CallResult value={call.result} /></td><td>{call.assignedEmployee || "غير معيّن"}</td><td>{formatDate(call.callAt)}</td><td className="notes-cell">{call.notes || "—"}</td></tr>)}</tbody></table></div> : <div className="empty"><span>☎</span><h3>{mode === "incoming" ? "لا توجد مكالمات واردة" : "لا توجد مكالمات مسجلة"}</h3><p>سجل مكالمة جديدة، وسيتم ربطها بالـLead تلقائيًا.</p><button className="primary" onClick={add}>＋ تسجيل مكالمة</button></div>}</section></div>;
 }
 
 function Priority({ value }: { value: string }) { const labels: Record<string,string> = { normal:"عادية", high:"مرتفعة", urgent:"عاجلة" }; return <span className={`priority ${value}`}>{labels[value] || value}</span>; }
