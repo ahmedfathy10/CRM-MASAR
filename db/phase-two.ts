@@ -5,15 +5,28 @@ let ready: Promise<void> | null = null;
 
 const leadFields = [
   ["fullName", "اسم العميل", "text", "اكتب اسم العميل", 1, 1, 1, "full", "[]"],
-  ["primaryPhone", "رقم الموبايل الأساسي", "tel", "01xxxxxxxxx", 1, 1, 2, "half", "[]"],
-  ["secondaryPhone", "رقم بديل", "tel", "رقم موبايل آخر", 0, 1, 3, "half", "[]"],
-  ["email", "البريد الإلكتروني", "email", "name@example.com", 0, 1, 4, "full", "[]"],
-  ["source", "مصدر العميل", "select", "اختر المصدر", 1, 1, 5, "half", '["Facebook","Instagram","TikTok","إعلان Google","ترشيح","زيارة مباشرة","مكالمة واردة","أخرى"]'],
-  ["campaign", "الحملة الإعلانية", "text", "اسم الحملة إن وجد", 0, 1, 6, "half", "[]"],
-  ["interest", "الخدمة المطلوبة", "text", "ما الذي يهتم به العميل؟", 1, 1, 7, "full", "[]"],
-  ["priority", "الأولوية", "select", "اختر الأولوية", 1, 1, 8, "half", '["عادية","مرتفعة","عاجلة"]'],
-  ["assignedEmployeeId", "الموظف المسؤول", "select", "اختر الموظف", 1, 1, 9, "half", "[]"],
-  ["notes", "ملاحظات أولية", "textarea", "تفاصيل أو احتياج العميل", 0, 1, 10, "full", "[]"],
+  ["primaryPhone", "رقم الموبايل", "tel", "اكتب الرقم بكود الدولة", 1, 1, 2, "full", "[]"],
+  ["secondaryPhone", "رقم الموبايل 2", "tel", "رقم بديل بكود الدولة", 0, 1, 3, "full", "[]"],
+  ["source", "المصدر", "select", "اختر المصدر", 1, 1, 4, "full", '["Facebook Call","Whatsapp Call","TikTok Call","Instagram Call","Google Call","Recommendation Call"]'],
+  ["course", "الكورس", "select", "اختر الكورس", 1, 1, 5, "full", '["English Course","German Course","Programming Course","Business Course","Other"]'],
+  ["branch", "الفرع", "select", "اختر الفرع", 1, 1, 6, "full", '["Maadi","Nasr City","New Cairo","Alexandria","Online"]'],
+  ["notes", "ملاحظات", "textarea", "اكتب الملاحظات", 0, 1, 7, "full", "[]"],
+];
+
+const leadDetailsFields = [
+  ["track", "المسار", "select", "اختر المسار", 0, 1, 1, "half", '["General","Conversation","Business","Kids","Exam Preparation"]'],
+  ["course", "الكورس", "select", "اختر الكورس", 0, 1, 2, "half", '["English Course","German Course","Programming Course","Business Course","Other"]'],
+  ["source", "المصدر", "select", "اختر المصدر", 0, 1, 3, "half", '["Facebook Call","Whatsapp Call","TikTok Call","Instagram Call","Google Call","Recommendation Call"]'],
+  ["location", "الموقع / المحافظة", "text", "مثال: المعادي", 0, 1, 4, "half", "[]"],
+  ["segment", "الشريحة", "select", "اختر الشريحة", 0, 1, 5, "half", '["Student","Graduate","Employee","Business Owner","Parent"]'],
+  ["gender", "النوع", "select", "اختر النوع", 0, 1, 6, "half", '["Male","Female"]'],
+  ["age", "العمر", "number", "اكتب العمر", 0, 1, 7, "half", "[]"],
+  ["nationality", "الجنسية", "text", "اكتب الجنسية", 0, 1, 8, "half", "[]"],
+  ["country", "الدولة", "text", "اكتب الدولة", 0, 1, 9, "half", "[]"],
+  ["job", "الوظيفة", "text", "اكتب الوظيفة", 0, 1, 10, "half", "[]"],
+  ["clientStatus", "حالة العميل", "select", "اختر الحالة", 0, 1, 11, "half", '["New","Interested","Not Interested","Follow Up","Registered"]'],
+  ["offer", "العرض", "text", "العرض المناسب للعميل", 0, 1, 12, "half", "[]"],
+  ["detailsNotes", "ملاحظات إضافية", "textarea", "اكتب باقي التفاصيل", 0, 1, 13, "full", "[]"],
 ];
 
 const callFields = [
@@ -43,10 +56,13 @@ async function initialize() {
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('lead', 'بيانات العميل المحتمل', 'الحقول المستخدمة عند تسجيل Lead جديدة')"),
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('call', 'بيانات المكالمة', 'الحقول المستخدمة عند تسجيل مكالمة')"),
+    db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('lead_details', 'استكمال بيانات العميل', 'البيانات التفصيلية التي يضيفها موظف المبيعات')"),
   ]);
-  const forms = await db.prepare("SELECT id, form_key AS formKey FROM form_definitions WHERE form_key IN ('lead','call')").all<{ id: number; formKey: string }>();
+  const forms = await db.prepare("SELECT id, form_key AS formKey FROM form_definitions WHERE form_key IN ('lead','call','lead_details')").all<{ id: number; formKey: string }>();
+  const leadForm = forms.results.find((form) => form.formKey === "lead");
+  if (leadForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key NOT IN ('fullName','primaryPhone','secondaryPhone','source','course','branch','notes')").bind(leadForm.id).run();
   const query = `INSERT INTO form_fields (form_id, field_key, label, type, placeholder, required, visible, sort_order, width, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(form_id, field_key) DO UPDATE SET label=excluded.label, type=excluded.type, placeholder=excluded.placeholder, sort_order=excluded.sort_order, width=excluded.width, options_json=excluded.options_json`;
-  const batches = forms.results.flatMap((form) => (form.formKey === "lead" ? leadFields : callFields).map((field) => db.prepare(query).bind(form.id, ...field)));
+  const batches = forms.results.flatMap((form) => (form.formKey === "lead" ? leadFields : form.formKey === "call" ? callFields : leadDetailsFields).map((field) => db.prepare(query).bind(form.id, ...field)));
   if (batches.length) await db.batch(batches);
 }
 
