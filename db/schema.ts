@@ -5,6 +5,8 @@ export const departments = sqliteTable("departments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   color: text("color").notNull().default("#2f6b5f"),
+  parentId: integer("parent_id"),
+  supportEnabled: integer("support_enabled", { mode: "boolean" }).notNull().default(false),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -67,4 +69,4 @@ export const formFields = sqliteTable("form_fields", {
   sortOrder: integer("sort_order").notNull().default(0),
   optionsJson: text("options_json").notNull().default("[]"),
   width: text("width", { enum: ["full", "half"] }).notNull().default("half"),
-});
+}, (table) => [uniqueIndex("form_fields_key_idx").on(table.formId, table.fieldKey)]);

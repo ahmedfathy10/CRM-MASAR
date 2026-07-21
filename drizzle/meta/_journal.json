@@ -8,6 +8,13 @@
       "when": 1784672330564,
       "tag": "0000_careless_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784674056646,
+      "tag": "0001_stormy_patriot",
+      "breakpoints": true
     }
   ]
 }
