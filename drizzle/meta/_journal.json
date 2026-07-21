@@ -15,6 +15,13 @@
       "when": 1784674056646,
       "tag": "0001_stormy_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784675163529,
+      "tag": "0002_loving_union_jack",
+      "breakpoints": true
     }
   ]
 }

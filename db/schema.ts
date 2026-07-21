@@ -62,7 +62,7 @@ export const formFields = sqliteTable("form_fields", {
   formId: integer("form_id").notNull().references(() => formDefinitions.id),
   fieldKey: text("field_key").notNull(),
   label: text("label").notNull(),
-  type: text("type", { enum: ["text", "email", "tel", "number", "date", "select", "textarea", "checkbox"] }).notNull(),
+  type: text("type", { enum: ["text", "email", "tel", "number", "date", "datetime-local", "select", "textarea", "checkbox"] }).notNull(),
   placeholder: text("placeholder").notNull().default(""),
   required: integer("required", { mode: "boolean" }).notNull().default(false),
   visible: integer("visible", { mode: "boolean" }).notNull().default(true),
@@ -70,3 +70,35 @@ export const formFields = sqliteTable("form_fields", {
   optionsJson: text("options_json").notNull().default("[]"),
   width: text("width", { enum: ["full", "half"] }).notNull().default("half"),
 }, (table) => [uniqueIndex("form_fields_key_idx").on(table.formId, table.fieldKey)]);
+
+export const leads = sqliteTable("leads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  fullName: text("full_name").notNull(),
+  primaryPhone: text("primary_phone").notNull(),
+  normalizedPhone: text("normalized_phone").notNull(),
+  secondaryPhone: text("secondary_phone").notNull().default(""),
+  email: text("email").notNull().default(""),
+  source: text("source").notNull().default("غير محدد"),
+  campaign: text("campaign").notNull().default(""),
+  interest: text("interest").notNull().default(""),
+  assignedEmployeeId: integer("assigned_employee_id").references(() => employees.id),
+  status: text("status").notNull().default("new"),
+  priority: text("priority").notNull().default("normal"),
+  notes: text("notes").notNull().default(""),
+  customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("leads_phone_idx").on(table.normalizedPhone)]);
+
+export const callRecords = sqliteTable("call_records", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  leadId: integer("lead_id").references(() => leads.id),
+  phone: text("phone").notNull(),
+  direction: text("direction").notNull().default("outgoing"),
+  result: text("result").notNull().default("no_answer"),
+  assignedEmployeeId: integer("assigned_employee_id").references(() => employees.id),
+  callAt: text("call_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  notes: text("notes").notNull().default(""),
+  customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

@@ -7,15 +7,15 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://masar-crm-eg.sites.openai.com"),
   openGraph: {
     title: "مسار CRM",
-    description: "إدارة مرنة تبدأ من فريقك",
-    images: ["/og.png"],
+    description: "من أول مكالمة لعميل محتمل",
+    images: ["/og-phase-2.png"],
     locale: "ar_EG",
   },
   twitter: {
     card: "summary_large_image",
     title: "مسار CRM",
-    description: "إدارة مرنة تبدأ من فريقك",
-    images: ["/og.png"],
+    description: "من أول مكالمة لعميل محتمل",
+    images: ["/og-phase-2.png"],
   },
 };
 

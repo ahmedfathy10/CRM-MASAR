@@ -7,20 +7,24 @@ type JobTitle = { id: number; name: string; departmentId: number; department: st
 type Role = { id: number; name: string; description: string };
 type Employee = { id: number; fullName: string; email: string; phone: string; status: "active" | "invited" | "disabled"; departmentId: number; jobTitleId: number; roleId: number; department: string; jobTitle: string; role: string };
 type Field = { id: number; fieldKey: string; label: string; type: string; placeholder: string; required: number; visible: number; sortOrder: number; width: "full" | "half"; version: number; optionsJson: string };
-type Setup = { departments: Department[]; jobTitles: JobTitle[]; roles: Role[]; employees: Employee[]; fields: Field[] };
-type Tab = "overview" | "departments" | "jobs" | "employees" | "leaves" | "permissions" | "forms";
-type Dialog = "employee" | "department" | "job" | "field" | null;
+type Lead = { id: number; fullName: string; primaryPhone: string; secondaryPhone: string; email: string; source: string; campaign: string; interest: string; status: string; priority: string; notes: string; assignedEmployeeId: number; assignedEmployee: string; callCount: number; createdAt: string };
+type CallRecord = { id: number; leadId: number | null; phone: string; direction: string; result: string; assignedEmployeeId: number; assignedEmployee: string; leadName: string | null; callAt: string; notes: string };
+type Setup = { departments: Department[]; jobTitles: JobTitle[]; roles: Role[]; employees: Employee[]; fields: Field[]; leads: Lead[]; calls: CallRecord[]; leadFields: Field[]; callFields: Field[] };
+type Tab = "overview" | "departments" | "jobs" | "employees" | "leaves" | "permissions" | "forms" | "leads" | "calls";
+type Dialog = "employee" | "department" | "job" | "field" | "lead" | "call" | null;
 
-const emptySetup: Setup = { departments: [], jobTitles: [], roles: [], employees: [], fields: [] };
+const emptySetup: Setup = { departments: [], jobTitles: [], roles: [], employees: [], fields: [], leads: [], calls: [], leadFields: [], callFields: [] };
 const titles: Record<Tab, [string, string]> = {
   overview: ["إدارة الموارد البشرية", "هيكل الشركة والموظفون في مكان واحد"], departments: ["أقسام الشركة", "الأقسام الرئيسية والفرعية التي تظهر في نموذج الموظف"], jobs: ["الأدوار الوظيفية", "كل قسم وتحته الوظائف المتاحة داخله"], employees: ["الموظفون", "بيانات الموظفين وحساباتهم على النظام"], leaves: ["الإجازات", "أنواع الإجازات وسياسات الاستحقاق"], permissions: ["الصلاحيات", "صلاحيات الصفحات والإجراءات لكل مجموعة"], forms: ["مصمم النماذج", "تحكم كامل في حقول إدخال بيانات الموظف"],
+  leads: ["العملاء المحتملون", "تسجيل وتوزيع الـLeads ومتابعة حالتها الأولية"], calls: ["سجل المكالمات", "تسجيل مكالمة جديدة وربطها تلقائيًا بالعميل"],
 };
 
 export function CrmShell() {
   const [tab, setTab] = useState<Tab>("overview"); const [data, setData] = useState<Setup>(emptySetup); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<Dialog>(null); const [notice, setNotice] = useState("");
-  async function load() { const response = await fetch("/api/setup", { cache: "no-store" }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "تعذر تحميل البيانات"); setData(payload); }
+  async function load() { const [setupResponse, salesResponse] = await Promise.all([fetch("/api/setup", { cache: "no-store" }), fetch("/api/leads", { cache: "no-store" })]); const setup = await setupResponse.json(); const sales = await salesResponse.json(); if (!setupResponse.ok) throw new Error(setup.error || "تعذر تحميل البيانات"); if (!salesResponse.ok) throw new Error(sales.error || "تعذر تحميل العملاء"); setData({ ...setup, ...sales }); }
   useEffect(() => { load().catch((error) => setNotice(error.message)).finally(() => setLoading(false)); }, []);
   async function mutate(payload: Record<string, unknown>) { const response = await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "تعذر الحفظ"); await load(); }
+  async function mutateSales(payload: Record<string, unknown>) { const response = await fetch("/api/leads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "تعذر الحفظ"); await load(); return result; }
   const [title, subtitle] = titles[tab];
   return <main className="app-shell" dir="rtl">
     <aside className="sidebar">
@@ -37,13 +41,15 @@ export function CrmShell() {
         <NavItem active={tab === "permissions"} icon="⌾" label="الصلاحيات" onClick={() => setTab("permissions")} />
         <NavItem active={tab === "forms"} icon="▤" label="مصمم النماذج" onClick={() => setTab("forms")} />
         <div className="nav-separator" />
-        <NavItem disabled icon="◇" label="العملاء المحتملون" badge="المرحلة 2" /><NavItem disabled icon="◷" label="المتابعات" badge="المرحلة 3" /><NavItem disabled icon="◫" label="المدفوعات" badge="المرحلة 4" /><NavItem disabled icon="◎" label="الجروبات" badge="المرحلة 5" />
+        <button className={`nav-group sales ${tab === "leads" || tab === "calls" ? "active" : ""}`} onClick={() => setTab("leads")}><span className="nav-icon">◇</span><span><strong>العملاء والمبيعات</strong><small>Leads & Calls</small></span><b>⌄</b></button>
+        <div className="subnav"><SubNav label="العملاء المحتملون" active={tab === "leads"} onClick={() => setTab("leads")} /><SubNav label="سجل المكالمات" active={tab === "calls"} onClick={() => setTab("calls")} /></div>
+        <NavItem disabled icon="◷" label="المتابعات" badge="المرحلة 3" /><NavItem disabled icon="◫" label="المدفوعات" badge="المرحلة 4" /><NavItem disabled icon="◎" label="الجروبات" badge="المرحلة 5" />
       </nav>
-      <div className="phase-card"><span>المرحلة الحالية</span><strong>01 — الموارد البشرية</strong><div className="progress"><i /></div><small>الأقسام، الوظائف، الموظفون والصلاحيات</small></div>
+      <div className="phase-card"><span>المرحلة الحالية</span><strong>02 — العملاء والمكالمات</strong><div className="progress phase-two"><i /></div><small>تسجيل العميل، منع التكرار وتوزيع المسؤولية</small></div>
       <div className="profile"><span className="avatar">أم</span><div><strong>أحمد منصور</strong><small>مدير النظام</small></div><button>•••</button></div>
     </aside>
     <section className="workspace">
-      <header className="topbar"><div><span className="eyebrow">مسار CRM <b>/</b> الموارد البشرية</span><h1>{title}</h1><p className="page-subtitle">{subtitle}</p></div><div className="top-actions"><button className="icon-button">♢<i /></button>{tab === "departments" && <button className="primary" onClick={() => setDialog("department")}>＋ إضافة قسم</button>}{tab === "jobs" && <button className="primary" onClick={() => setDialog("job")}>＋ إضافة وظيفة</button>}{tab === "employees" && <button className="primary" onClick={() => setDialog("employee")}>＋ إضافة موظف</button>}{tab === "forms" && <button className="primary" onClick={() => setDialog("field")}>＋ إضافة حقل</button>}</div></header>
+      <header className="topbar"><div><span className="eyebrow">مسار CRM <b>/</b> {tab === "leads" || tab === "calls" ? "العملاء والمبيعات" : "الموارد البشرية"}</span><h1>{title}</h1><p className="page-subtitle">{subtitle}</p></div><div className="top-actions"><button className="icon-button">♢<i /></button>{tab === "departments" && <button className="primary" onClick={() => setDialog("department")}>＋ إضافة قسم</button>}{tab === "jobs" && <button className="primary" onClick={() => setDialog("job")}>＋ إضافة وظيفة</button>}{tab === "employees" && <button className="primary" onClick={() => setDialog("employee")}>＋ إضافة موظف</button>}{tab === "forms" && <button className="primary" onClick={() => setDialog("field")}>＋ إضافة حقل</button>}{tab === "leads" && <button className="primary" onClick={() => setDialog("lead")}>＋ تسجيل Lead</button>}{tab === "calls" && <button className="primary" onClick={() => setDialog("call")}>＋ تسجيل مكالمة</button>}</div></header>
       {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
       {loading ? <Loading /> : <Page tab={tab} data={data} mutate={mutate} open={setDialog} setNotice={setNotice} />}
     </section>
@@ -51,6 +57,8 @@ export function CrmShell() {
     {dialog === "department" && <DepartmentDialog departments={data.departments} onClose={() => setDialog(null)} onSubmit={async (payload) => { await mutate({ action: "createDepartment", ...payload }); setDialog(null); setNotice("تمت إضافة القسم وسيظهر الآن في نموذج الموظف"); }} />}
     {dialog === "job" && <JobDialog departments={data.departments} onClose={() => setDialog(null)} onSubmit={async (payload) => { await mutate({ action: "createJobTitle", ...payload }); setDialog(null); setNotice("تمت إضافة الوظيفة تحت القسم المحدد"); }} />}
     {dialog === "field" && <FieldDialog onClose={() => setDialog(null)} onSubmit={async (payload) => { await mutate({ action: "addField", ...payload }); setDialog(null); setNotice("تمت إضافة الحقل إلى نموذج الموظف"); }} />}
+    {dialog === "lead" && <LeadDialog data={data} onClose={() => setDialog(null)} onSubmit={async (payload) => { await mutateSales({ action: "createLead", ...payload }); setDialog(null); setNotice("تم تسجيل العميل المحتمل وتعيين الموظف المسؤول"); }} />}
+    {dialog === "call" && <CallDialog data={data} onClose={() => setDialog(null)} onSubmit={async (payload) => { const result = await mutateSales({ action: "createCall", ...payload }); setDialog(null); setNotice(result.matchedLead ? "تم تسجيل المكالمة وربطها بالعميل الموجود" : "تم تسجيل المكالمة كرقم غير مرتبط بعميل"); }} />}
   </main>;
 }
 
@@ -61,6 +69,8 @@ function Page({ tab, data, mutate, open, setNotice }: { tab: Tab; data: Setup; m
   if (tab === "employees") return <Employees data={data} add={() => open("employee")} />;
   if (tab === "leaves") return <Leaves />;
   if (tab === "permissions") return <Permissions roles={data.roles} />;
+  if (tab === "leads") return <LeadsPage data={data} addLead={() => open("lead")} addCall={() => open("call")} />;
+  if (tab === "calls") return <CallsPage data={data} add={() => open("call")} />;
   return <FormBuilder fields={data.fields} data={data} mutate={mutate} onAdd={() => open("field")} />;
 }
 
@@ -97,6 +107,41 @@ function FormBuilder({ fields, data, mutate, onAdd }: { fields: Field[]; data: S
   return <div className="builder-layout"><section className="panel field-panel"><div className="panel-head"><div><span className="version">نسخة {fields[0]?.version ?? 1}</span><h2>نموذج بيانات الموظف</h2><p>{fields.length} حقلًا قابلًا للتحكم من هنا.</p></div><button className="secondary" onClick={onAdd}>＋ حقل جديد</button></div><div className="field-list">{fields.map((f, i) => <div className={`field-row ${!f.visible ? "muted" : ""}`} key={f.id}><span className="drag">⠿</span><span className="field-index">{String(i + 1).padStart(2,"0")}</span><div className="field-info"><strong>{f.label}</strong><small>{f.fieldKey} · {f.type}</small></div><label className="mini-toggle"><input type="checkbox" checked={!!f.required} onChange={async (e) => { setSaving(f.id); await mutate({ action:"toggleField", id:f.id, visible:!!f.visible, required:e.target.checked }); setSaving(null); }} /><span />إلزامي</label><label className="mini-toggle"><input type="checkbox" checked={!!f.visible} onChange={async (e) => { setSaving(f.id); await mutate({ action:"toggleField", id:f.id, visible:e.target.checked, required:!!f.required }); setSaving(null); }} /><span />ظاهر</label><button className="row-menu">{saving === f.id ? "…" : "•••"}</button></div>)}</div></section><section className="panel preview-panel"><div className="preview-head"><div><span className="live-dot" />معاينة مباشرة</div><span>أول الحقول</span></div><div className="form-preview"><div className="preview-title"><span>＋</span><div><h3>موظف جديد</h3><p>المعاينة تتغير مع إعدادات الحقول.</p></div></div><div className="dynamic-grid">{previewFields.map((f) => <DynamicField key={f.id} field={f} value="" setValue={() => {}} data={data} values={{}} disabled />)}</div></div></section></div>;
 }
 
+function LeadsPage({ data, addLead, addCall }: { data: Setup; addLead: () => void; addCall: () => void }) {
+  const newCount = data.leads.filter((lead) => lead.status === "new").length;
+  const urgent = data.leads.filter((lead) => lead.priority === "urgent").length;
+  return <div className="content-stack lead-board">
+    <section className="metrics"><Metric label="إجمالي الـLeads" value={data.leads.length} hint="عملاء محتملون" tone="green" /><Metric label="جديدة" value={newCount} hint="لم تبدأ المتابعة" tone="blue" /><Metric label="أولوية عاجلة" value={urgent} hint="تحتاج تصرفًا سريعًا" tone="orange" /><Metric label="المكالمات" value={data.calls.length} hint="مسجلة في المرحلة" tone="purple" /></section>
+    <section className="panel"><div className="panel-head"><div><h2>قائمة العملاء المحتملين</h2><p>رقم الهاتف فريد، وأي محاولة لتسجيله مرة أخرى ستظهر العميل الموجود.</p></div><div className="filters"><label className="search"><span>⌕</span><input placeholder="ابحث بالاسم أو الهاتف..." /></label><button className="secondary" onClick={addCall}>☎ مكالمة جديدة</button><button className="primary" onClick={addLead}>＋ Lead جديدة</button></div></div>
+      {data.leads.length ? <div className="table-wrap"><table><thead><tr><th>العميل</th><th>المصدر</th><th>الخدمة المطلوبة</th><th>الموظف المسؤول</th><th>الأولوية</th><th>الحالة</th><th>المكالمات</th><th /></tr></thead><tbody>{data.leads.map((lead) => <tr key={lead.id}><td><div className="employee lead-person"><span>{initials(lead.fullName)}</span><div><strong>{lead.fullName}</strong><small>{lead.primaryPhone}</small></div></div></td><td><span className="source-chip">{lead.source}</span></td><td>{lead.interest || "—"}</td><td>{lead.assignedEmployee || "غير معيّن"}</td><td><Priority value={lead.priority} /></td><td><LeadStatus value={lead.status} /></td><td><button className="calls-count" onClick={addCall}>☎ {lead.callCount}</button></td><td><button className="row-menu">•••</button></td></tr>)}</tbody></table></div> : <div className="empty"><span>◇</span><h3>لا توجد Leads حتى الآن</h3><p>سجل أول عميل محتمل وحدد مصدره والموظف المسؤول.</p><button className="primary" onClick={addLead}>＋ تسجيل Lead جديدة</button></div>}
+      <div className="table-footer"><span>إجمالي {data.leads.length} عميل محتمل</span><span className="duplicate-guard">✓ منع تكرار الهاتف مفعّل</span></div>
+    </section>
+  </div>;
+}
+
+function CallsPage({ data, add }: { data: Setup; add: () => void }) {
+  const answered = data.calls.filter((call) => call.result === "answered").length;
+  const linked = data.calls.filter((call) => call.leadId).length;
+  return <div className="content-stack"><section className="metrics"><Metric label="إجمالي المكالمات" value={data.calls.length} hint="كل المكالمات المسجلة" tone="green" /><Metric label="تم الرد" value={answered} hint="مكالمات مكتملة" tone="blue" /><Metric label="مرتبطة بعميل" value={linked} hint="تم التعرف على الرقم" tone="orange" /><Metric label="أرقام جديدة" value={data.calls.length - linked} hint="غير مرتبطة بـLead" tone="purple" /></section><section className="panel"><div className="panel-head"><div><h2>سجل المكالمات</h2><p>يتم البحث عن رقم الهاتف وربطه تلقائيًا بعميل موجود.</p></div><button className="primary" onClick={add}>＋ تسجيل مكالمة</button></div>{data.calls.length ? <div className="table-wrap"><table><thead><tr><th>العميل / الرقم</th><th>نوع المكالمة</th><th>النتيجة</th><th>الموظف المسؤول</th><th>التوقيت</th><th>الملاحظات</th></tr></thead><tbody>{data.calls.map((call) => <tr key={call.id}><td><div className="call-identity"><strong>{call.leadName || "رقم غير مسجل"}</strong><small>{call.phone}</small></div></td><td><span className={`direction ${call.direction}`}>{call.direction === "incoming" ? "↙ واردة" : "↗ صادرة"}</span></td><td><CallResult value={call.result} /></td><td>{call.assignedEmployee || "غير معيّن"}</td><td>{formatDate(call.callAt)}</td><td className="notes-cell">{call.notes || "—"}</td></tr>)}</tbody></table></div> : <div className="empty"><span>☎</span><h3>لا توجد مكالمات مسجلة</h3><p>سجل مكالمة واردة أو صادرة، وسيتم ربطها بالـLead تلقائيًا.</p><button className="primary" onClick={add}>＋ تسجيل مكالمة</button></div>}</section></div>;
+}
+
+function Priority({ value }: { value: string }) { const labels: Record<string,string> = { normal:"عادية", high:"مرتفعة", urgent:"عاجلة" }; return <span className={`priority ${value}`}>{labels[value] || value}</span>; }
+function LeadStatus({ value }: { value: string }) { const labels: Record<string,string> = { new:"جديدة", contacted:"تم التواصل", qualified:"مؤهلة", unqualified:"غير مؤهلة" }; return <span className={`lead-status ${value}`}><i />{labels[value] || value}</span>; }
+function CallResult({ value }: { value: string }) { const labels: Record<string,string> = { answered:"تم الرد", no_answer:"لم يرد", busy:"مشغول", wrong_number:"رقم خاطئ", callback:"معاودة الاتصال" }; return <span className={`call-result ${value}`}>{labels[value] || value}</span>; }
+function formatDate(value: string) { try { return new Intl.DateTimeFormat("ar-EG", { dateStyle:"short", timeStyle:"short" }).format(new Date(value)); } catch { return value; } }
+
+function LeadDialog({ data, onClose, onSubmit }: { data: Setup; onClose: () => void; onSubmit: (p: Record<string,unknown>) => Promise<void> }) {
+  const [values,setValues]=useState<Record<string,unknown>>({priority:"عادية"}); const [busy,setBusy]=useState(false); const [error,setError]=useState(""); const fields=data.leadFields.filter((f)=>f.visible);
+  async function submit(e:FormEvent){e.preventDefault();setBusy(true);setError("");try{const standard=new Set(["fullName","primaryPhone","secondaryPhone","email","source","campaign","interest","priority","assignedEmployeeId","notes"]);const customData=Object.fromEntries(Object.entries(values).filter(([key])=>!standard.has(key)));await onSubmit({...values,customData});}catch(err){setError(err instanceof Error?err.message:"تعذر تسجيل العميل");setBusy(false)}}
+  return <div className="overlay" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><form className="dialog sales-dialog" onSubmit={submit}><div className="dialog-head"><div><span className="dialog-icon">◇</span><div><h2>تسجيل Lead جديدة</h2><p>بيانات العميل ومصدره والموظف المسؤول.</p></div></div><button type="button" onClick={onClose}>×</button></div>{error&&<p className="form-error duplicate-error">{error}</p>}<div className="employee-form-note"><span>✓</span><p>سيتم تنظيف رقم الهاتف ومراجعته لمنع تسجيل نفس العميل مرتين.</p></div><div className="dynamic-grid dialog-fields">{fields.map((field)=><DynamicField key={field.id} field={field} value={values[field.fieldKey]} setValue={(value)=>setValues((current)=>({...current,[field.fieldKey]:value}))} data={data} values={values}/>)}</div><div className="dialog-foot"><button className="secondary" type="button" onClick={onClose}>إلغاء</button><button className="primary" disabled={busy}>{busy?"جارٍ التحقق والحفظ...":"تسجيل العميل"}</button></div></form></div>;
+}
+
+function CallDialog({ data, onClose, onSubmit }: { data: Setup; onClose: () => void; onSubmit: (p: Record<string,unknown>) => Promise<void> }) {
+  const now=new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset()); const [values,setValues]=useState<Record<string,unknown>>({direction:"صادرة",result:"تم الرد",callAt:now.toISOString().slice(0,16)}); const [busy,setBusy]=useState(false); const [error,setError]=useState(""); const fields=data.callFields.filter((f)=>f.visible);
+  async function submit(e:FormEvent){e.preventDefault();setBusy(true);setError("");try{const standard=new Set(["phone","direction","result","assignedEmployeeId","callAt","notes"]);const customData=Object.fromEntries(Object.entries(values).filter(([key])=>!standard.has(key)));await onSubmit({...values,customData});}catch(err){setError(err instanceof Error?err.message:"تعذر تسجيل المكالمة");setBusy(false)}}
+  return <div className="overlay" onMouseDown={(e)=>e.target===e.currentTarget&&onClose()}><form className="dialog sales-dialog compact-sales" onSubmit={submit}><div className="dialog-head"><div><span className="dialog-icon">☎</span><div><h2>تسجيل مكالمة جديدة</h2><p>لو الرقم مسجل سيتم ربط المكالمة بالعميل تلقائيًا.</p></div></div><button type="button" onClick={onClose}>×</button></div>{error&&<p className="form-error">{error}</p>}<div className="dynamic-grid dialog-fields">{fields.map((field)=><DynamicField key={field.id} field={field} value={values[field.fieldKey]} setValue={(value)=>setValues((current)=>({...current,[field.fieldKey]:value}))} data={data} values={values}/>)}</div><div className="dialog-foot"><button className="secondary" type="button" onClick={onClose}>إلغاء</button><button className="primary" disabled={busy}>{busy?"جارٍ التسجيل...":"حفظ المكالمة"}</button></div></form></div>;
+}
+
 function Metric({ label, value, hint, tone }: { label: string; value: number; hint: string; tone: string }) { return <article className="metric"><span className={`metric-icon ${tone}`}>◆</span><div><small>{label}</small><strong>{String(value).padStart(2,"0")}</strong><p>{hint}</p></div></article>; }
 function Status({ status }: { status: Employee["status"] }) { const map = { active:"نشط", invited:"دعوة معلقة", disabled:"موقوف" }; return <span className={`status ${status}`}><i />{map[status]}</span>; }
 function initials(name: string) { return name.split(" ").slice(0,2).map((part) => part[0]).join(""); }
@@ -113,6 +158,7 @@ function DynamicField({ field, value, setValue, data, values, disabled=false }: 
   if(field.fieldKey==="departmentId") options=data.departments.map((d)=>({id:d.id,name:d.name}));
   if(field.fieldKey==="jobTitleId") options=data.jobTitles.filter((j)=>!values.departmentId||j.departmentId===Number(values.departmentId)).map((j)=>({id:j.id,name:j.name}));
   if(field.fieldKey==="roleId") options=data.roles.map((r)=>({id:r.id,name:r.name}));
+  if(field.fieldKey==="assignedEmployeeId") options=data.employees.filter((employee)=>employee.status==="active").map((employee)=>({id:employee.id,name:employee.fullName}));
   const common={disabled,required:!!field.required};
   if(field.type==="textarea") return <label className="full"><span>{field.label}{field.required?" *":""}</span><textarea value={String(value??"")} placeholder={field.placeholder} onChange={(e)=>setValue(e.target.value)} disabled={disabled} required={!!field.required}/></label>;
   if(field.type==="checkbox") { const selected=Array.isArray(value)?value as string[]:[]; return <fieldset className="full document-field"><legend>{field.label}</legend><div>{options.map((o)=><label key={o.id}><input type="checkbox" checked={selected.includes(String(o.id))} disabled={disabled} onChange={(e)=>setValue(e.target.checked?[...selected,String(o.id)]:selected.filter((x)=>x!==String(o.id)))} /><span>✓</span>{o.name}</label>)}</div></fieldset>; }
