@@ -101,6 +101,7 @@ export const groupMembers = sqliteTable("group_members", {
 
 export const employees = sqliteTable("employees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  hrId: text("hr_id").notNull().default(""),
   fullName: text("full_name").notNull(),
   email: text("email").notNull(),
   phone: text("phone").notNull().default(""),

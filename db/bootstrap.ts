@@ -17,7 +17,7 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS students_level_idx ON students (level_id, full_name)`,
   `CREATE TABLE IF NOT EXISTS group_members (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL REFERENCES settings_entities(id), student_reference TEXT NOT NULL, joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS group_members_unique_idx ON group_members (group_id, student_reference)`,
-  `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, hr_id TEXT NOT NULL DEFAULT '', full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_definitions (id INTEGER PRIMARY KEY AUTOINCREMENT, form_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_fields (id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER NOT NULL REFERENCES form_definitions(id), field_key TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL, placeholder TEXT NOT NULL DEFAULT '', required INTEGER NOT NULL DEFAULT 0, visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL DEFAULT '[]', width TEXT NOT NULL DEFAULT 'half')`,
   `CREATE INDEX IF NOT EXISTS employees_department_idx ON employees (department_id)`,
@@ -37,13 +37,12 @@ const employeeFields: FieldSeed[] = [
   ["address", "العنوان", "textarea", "اكتب عنوان الموظف", 0, 1, 7, "full", "[]"],
   ["nationalId", "الرقم القومي", "text", "اكتب الرقم القومي", 0, 1, 8, "half", "[]"],
   ["startDate", "تاريخ بداية العمل", "date", "", 1, 1, 9, "half", "[]"],
-  ["salaryType", "نوع الراتب", "select", "اختر نوع الراتب", 0, 1, 10, "half", '["شهري","يومي","بالساعة","عمولة"]'],
+  ["employmentType", "نوع التعاقد", "select", "اختر نوع التعاقد", 1, 1, 10, "half", '["Full Time","Part Time","Freelance","Internship"]'],
   ["salary", "الراتب", "number", "اكتب الراتب", 0, 1, 11, "half", "[]"],
   ["branchId", "الفرع", "select", "اختر الفرع", 1, 1, 12, "full", "[]"],
   ["departmentId", "القسم", "select", "اختر القسم", 1, 1, 13, "half", "[]"],
   ["jobTitleId", "الدور الوظيفي", "select", "اختر القسم أولًا", 1, 1, 14, "half", "[]"],
-  ["roleId", "مجموعة الصلاحيات", "select", "اختر الصلاحيات", 1, 1, 15, "full", "[]"],
-  ["status", "حالة الموظف", "select", "اختر الحالة", 1, 1, 16, "half", '["نشط","تحت التجربة","إجازة","موقوف"]'],
+  ["status", "حالة الموظف", "select", "اختر الحالة", 1, 1, 16, "half", '["نشط","تحت التجربة","إجازة","استقالة","انقطاع عن العمل","إنهاء العمل"]'],
   ["insuranceStatus", "حالة التأمين", "select", "اختر حالة التأمين", 0, 1, 17, "half", '["مؤمّن عليه","غير مؤمّن عليه","قيد الإجراء"]'],
   ["notes", "ملاحظات", "textarea", "اكتب أي ملاحظات إضافية", 0, 1, 18, "full", "[]"],
   ["documents", "المستندات المستلمة", "checkbox", "", 0, 1, 19, "full", '["البطاقة الشخصية","المؤهل الدراسي","شهادة الميلاد","فيش وتشبيه","صور شخصية","موقف التجنيد","شهادة الخبرة"]'],
@@ -105,6 +104,8 @@ async function initialize() {
   if (!columnNames.has("support_enabled")) await db.prepare("ALTER TABLE departments ADD COLUMN support_enabled INTEGER NOT NULL DEFAULT 0").run();
   const employeeColumns = await db.prepare("PRAGMA table_info(employees)").all<{ name: string }>();
   if (!employeeColumns.results.some((column) => column.name === "branch_id")) await db.prepare("ALTER TABLE employees ADD COLUMN branch_id INTEGER REFERENCES branches(id)").run();
+  if (!employeeColumns.results.some((column) => column.name === "hr_id")) await db.prepare("ALTER TABLE employees ADD COLUMN hr_id TEXT NOT NULL DEFAULT ''").run();
+  await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS employees_hr_id_idx ON employees (hr_id) WHERE hr_id<>''").run();
   await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS form_fields_key_idx ON form_fields (form_id, field_key)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS employees_branch_idx ON employees (branch_id)").run();
   const branchColumns = await db.prepare("PRAGMA table_info(branches)").all<{ name: string }>();
@@ -162,6 +163,7 @@ async function initialize() {
   const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'employee'").first<{ id: number }>();
   if (!form) return;
   await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key='branch'").bind(form.id).run();
+  await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key IN ('salaryType','roleId')").bind(form.id).run();
   const query = `INSERT INTO form_fields (form_id, field_key, label, type, placeholder, required, visible, sort_order, width, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(form_id, field_key) DO UPDATE SET label=excluded.label, type=excluded.type, placeholder=excluded.placeholder, sort_order=excluded.sort_order, width=excluded.width, options_json=excluded.options_json`;
   await db.batch(employeeFields.map((field) => db.prepare(query).bind(form.id, ...field)));
   const branchForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'branch'").first<{ id: number }>();

@@ -1,0 +1,1 @@
+ALTER TABLE `employees` ADD `hr_id` text DEFAULT '' NOT NULL;

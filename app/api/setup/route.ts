@@ -11,7 +11,7 @@ export async function GET() {
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
-      db.prepare(`SELECT e.id, e.full_name AS fullName, e.email, e.phone, e.status, e.department_id AS departmentId, e.job_title_id AS jobTitleId, e.role_id AS roleId, e.branch_id AS branchId, d.name AS department, j.name AS jobTitle, r.name AS role, b.name AS branchName FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN roles r ON r.id=e.role_id LEFT JOIN branches b ON b.id=e.branch_id ORDER BY e.id DESC`).all(),
+      db.prepare(`SELECT e.id, e.hr_id AS hrId, e.full_name AS fullName, e.email, e.phone, e.status, e.custom_data AS customData, e.department_id AS departmentId, e.job_title_id AS jobTitleId, e.role_id AS roleId, e.branch_id AS branchId, d.name AS department, j.name AS jobTitle, r.name AS role, b.name AS branchName FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN roles r ON r.id=e.role_id LEFT JOIN branches b ON b.id=e.branch_id ORDER BY e.id DESC`).all(),
       db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
       db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
       db.prepare(`SELECT id, title, is_active AS isActive, custom_data AS customData FROM tracks ORDER BY title`).all(),
@@ -38,11 +38,14 @@ export async function POST(request: Request) {
       const fullName = String(payload.fullName ?? "").trim();
       const email = String(payload.email ?? "").trim().toLowerCase();
       if (!fullName || !email) return Response.json({ error: "الاسم والبريد الإلكتروني مطلوبان" }, { status: 400 });
-      const requestedStatus = String(payload.status ?? "");
-      const status = requestedStatus === "نشط" ? "active" : requestedStatus === "موقوف" ? "disabled" : "invited";
-      const result = await db.prepare("INSERT INTO employees (full_name, email, phone, department_id, job_title_id, role_id, branch_id, status, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(fullName, email, String(payload.phone ?? ""), Number(payload.departmentId) || null, Number(payload.jobTitleId) || null, Number(payload.roleId) || null, Number(payload.branchId) || null, status, JSON.stringify(payload.customData ?? {})).run();
-      return Response.json({ id: result.meta.last_row_id }, { status: 201 });
+      const requestedStatus = String(payload.status ?? "نشط");
+      const departmentId=Number(payload.departmentId)||null;
+      const result = await db.prepare("INSERT INTO employees (hr_id, full_name, email, phone, department_id, job_title_id, role_id, branch_id, status, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind("PENDING", fullName, email, String(payload.phone ?? ""), departmentId, Number(payload.jobTitleId) || null, Number(payload.roleId) || null, Number(payload.branchId) || null, requestedStatus, JSON.stringify(payload.customData ?? {})).run();
+      const id=Number(result.meta.last_row_id); const department=departmentId?await db.prepare("SELECT name FROM departments WHERE id=?").bind(departmentId).first<{name:string}>():null;
+      const prefix=(department?.name||"HR").replace(/\s+/g,"").slice(0,3).toUpperCase()||"HR"; const hrId=`${prefix}-${String(id).padStart(4,"0")}`;
+      await db.prepare("UPDATE employees SET hr_id=? WHERE id=?").bind(hrId,id).run();
+      return Response.json({ id,hrId }, { status: 201 });
     }
 
     if (action === "createBranch" || action === "updateBranch") {
