@@ -211,7 +211,7 @@ function GroupsPage({data,mutate,setNotice,selectedGroup,selectGroup}:{data:Setu
   const currentBatchIds=new Set(currentBatches.map((item)=>item.id));
   const groups=data.settingsEntities.filter((item)=>{if(item.kind!=="group")return false;const info=details(item);return currentBatchIds.has(Number(info.batchId))&&(!batchId||Number(info.batchId)===Number(batchId))&&(!branchId||Number(info.branchId)===Number(branchId))&&(!levelId||Number(info.levelId)===Number(levelId));});
   const entity=(kind:string,id:unknown)=>data.settingsEntities.find((item)=>item.kind===kind&&item.id===Number(id))?.title||"—";
-  const isOnline=(group:SettingsEntity)=>/online|أونلاين|اونلاين/i.test(entity("study_type",details(group).studyTypeId));
+  const isOnline=(_group:SettingsEntity)=>true;
   async function deleteEmpty(){if(!batchId){setNotice("اختر Current Batch أولًا");return}if(!window.confirm("سيتم حذف الجروبات التي لا تحتوي على طلاب في الباتش المختار فقط. متابعة؟"))return;try{const result=await mutate({action:"deleteEmptyGroups",batchId:Number(batchId)}) as unknown as {deleted?:number};setNotice(`تم حذف ${result?.deleted??0} جروب فارغ`)}catch(error){setNotice(error instanceof Error?error.message:"تعذر حذف الجروبات الفارغة")}}
   if(selectedGroup)return <GroupsLegacy data={data} mutate={mutate} setNotice={setNotice} selectedGroup={selectedGroup} selectGroup={selectGroup}/>;
   const staffPool=staff?data.employees.filter((employee)=>{const scope=`${employee.jobTitle||""} ${employee.department||""}`.toLowerCase();return (employee.status==="active"||employee.status==="نشط")&&(staff.role==="teacher"?/(english|german|انجليزى|انجليزي|الماني|ألماني)/i.test(scope):/(operation|operations|تشغيل|اوبريشن)/i.test(scope));}):[];
