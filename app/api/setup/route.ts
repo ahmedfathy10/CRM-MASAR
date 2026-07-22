@@ -217,7 +217,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "createSettingsEntity" || action === "updateSettingsEntity") {
-      const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card","exam"]);
+      const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card","source","exam"]);
       const kind=String(payload.kind??"");
       if(!allowedKinds.has(kind)) return Response.json({error:"نوع الإعداد غير مدعوم"},{status:400});
       const details=(payload.customData??{}) as Record<string,unknown>;

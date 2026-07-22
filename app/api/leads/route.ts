@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       const assignee = Number(payload.assignedEmployeeId) || (await db.prepare("SELECT id FROM employees WHERE status='active' ORDER BY id LIMIT 1").first<{ id: number }>())?.id || null;
       const customData = (payload.customData as Record<string, unknown>) ?? {};
       const result = await db.prepare(`INSERT INTO leads (full_name, primary_phone, normalized_phone, secondary_phone, email, source, campaign, interest, assigned_employee_id, branch_id, priority, notes, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(fullName, primaryPhone, normalizedPhone, String(payload.secondaryPhone ?? ""), "", String(payload.source ?? "غير محدد"), "", String(payload.course ?? ""), assignee, Number(payload.branchId) || null, "normal", String(payload.notes ?? ""), JSON.stringify(customData)).run();
+        .bind(fullName, primaryPhone, normalizedPhone, String(payload.secondaryPhone ?? ""), "", String(payload.source ?? "غير محدد"), "", String(payload.interest ?? payload.course ?? ""), assignee, Number(payload.branchId) || null, "normal", String(payload.notes ?? ""), JSON.stringify(customData)).run();
       return Response.json({ id: result.meta.last_row_id }, { status: 201 });
     }
     if (action === "updateLeadDetails") {
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       const details = (payload.details as Record<string, unknown>) ?? {};
       const merged = { ...current, ...details };
       await db.prepare("UPDATE leads SET source=?, interest=?, notes=?, custom_data=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .bind(String(details.source ?? payload.source ?? "غير محدد"), String(details.course ?? ""), String(details.detailsNotes ?? payload.notes ?? ""), JSON.stringify(merged), id).run();
+        .bind(String(details.source ?? payload.source ?? "غير محدد"), String(details.interest ?? details.course ?? ""), String(details.detailsNotes ?? payload.notes ?? ""), JSON.stringify(merged), id).run();
       return Response.json({ ok: true });
     }
     if (action === "recordLeadCallResult") {

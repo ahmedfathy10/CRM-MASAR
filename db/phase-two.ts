@@ -7,8 +7,8 @@ const leadFields = [
   ["fullName", "اسم العميل", "text", "اكتب اسم العميل", 1, 1, 1, "full", "[]"],
   ["primaryPhone", "رقم الموبايل", "tel", "اكتب الرقم بكود الدولة", 1, 1, 2, "full", "[]"],
   ["secondaryPhone", "رقم الموبايل 2", "tel", "رقم بديل بكود الدولة", 0, 1, 3, "full", "[]"],
-  ["source", "المصدر", "select", "اختر المصدر", 1, 1, 4, "full", '["Facebook Call","Whatsapp Call","TikTok Call","Instagram Call","Google Call","Recommendation Call"]'],
-  ["course", "الكورس", "select", "اختر الكورس", 1, 1, 5, "full", '["English Course","German Course","Programming Course","Business Course","Other"]'],
+  ["source", "المصدر", "select", "اختر المصدر", 1, 1, 4, "full", "[]"],
+  ["interest", "الـTrack", "select", "اختر الـTrack", 1, 1, 5, "full", "[]"],
   ["branchId", "الفرع", "select", "اختر الفرع", 1, 1, 6, "full", "[]"],
   ["notes", "ملاحظات", "textarea", "اكتب الملاحظات", 0, 1, 7, "full", "[]"],
 ];
@@ -81,7 +81,7 @@ async function initialize() {
   ]);
   const forms = await db.prepare("SELECT id, form_key AS formKey FROM form_definitions WHERE form_key IN ('lead','call','lead_details','followup')").all<{ id: number; formKey: string }>();
   const leadForm = forms.results.find((form) => form.formKey === "lead");
-  if (leadForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key NOT IN ('fullName','primaryPhone','secondaryPhone','source','course','branchId','notes')").bind(leadForm.id).run();
+  if (leadForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key NOT IN ('fullName','primaryPhone','secondaryPhone','source','interest','branchId','notes')").bind(leadForm.id).run();
   const query = `INSERT INTO form_fields (form_id, field_key, label, type, placeholder, required, visible, sort_order, width, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(form_id, field_key) DO UPDATE SET label=excluded.label, type=excluded.type, placeholder=excluded.placeholder, sort_order=excluded.sort_order, width=excluded.width, options_json=excluded.options_json`;
   const batches = forms.results.flatMap((form) => (form.formKey === "lead" ? leadFields : form.formKey === "call" ? callFields : form.formKey === "followup" ? followupFields : leadDetailsFields).map((field) => db.prepare(query).bind(form.id, ...field)));
   if (batches.length) await db.batch(batches);
