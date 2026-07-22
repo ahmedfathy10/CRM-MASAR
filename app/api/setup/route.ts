@@ -7,7 +7,7 @@ export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
-    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, forms] = await Promise.all([
+    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, forms] = await Promise.all([
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
@@ -15,9 +15,10 @@ export async function GET() {
       db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
       db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
       db.prepare(`SELECT id, title, is_active AS isActive, custom_data AS customData FROM tracks ORDER BY title`).all(),
-      db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('employee','branch','classroom','track') ORDER BY f.form_key, ff.sort_order`).all(),
+      db.prepare(`SELECT id, title, start_time AS startTime, end_time AS endTime, is_active AS isActive, custom_data AS customData FROM time_slots ORDER BY start_time`).all(),
+      db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('employee','branch','classroom','track','time_slot') ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
-    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track") });
+    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot") });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "تعذر تحميل البيانات" }, { status: 500 });
   }
@@ -110,6 +111,34 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "createTimeSlot" || action === "updateTimeSlot") {
+      const title = String(payload.title ?? "").trim();
+      const startTime = String(payload.startTime ?? "").trim();
+      const endTime = String(payload.endTime ?? "").trim();
+      const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+      if (!title || !timePattern.test(startTime) || !timePattern.test(endTime)) return Response.json({ error: "اسم الفترة ووقت بداية ونهاية صحيحان مطلوبون" }, { status: 400 });
+      if (startTime >= endTime) return Response.json({ error: "وقت النهاية يجب أن يكون بعد وقت البداية" }, { status: 400 });
+      const id = action === "updateTimeSlot" ? Number(payload.id) : 0;
+      const duplicate = await db.prepare("SELECT id FROM time_slots WHERE LOWER(title)=LOWER(?) AND id<>?").bind(title, id).first();
+      if (duplicate) return Response.json({ error: "يوجد نظام وقت بنفس الاسم" }, { status: 409 });
+      const overlap = await db.prepare("SELECT id FROM time_slots WHERE id<>? AND is_active=1 AND NOT (end_time<=? OR start_time>=?)").bind(id, startTime, endTime).first();
+      const rawStatus = payload.isActive;
+      const isActive = rawStatus === false || rawStatus === 0 || rawStatus === "0" || rawStatus === "غير نشط" || rawStatus === "inactive" ? 0 : 1;
+      if (isActive && overlap) return Response.json({ error: "الفترة الزمنية تتداخل مع فترة نشطة موجودة" }, { status: 409 });
+      const customData = JSON.stringify(payload.customData ?? {});
+      if (action === "updateTimeSlot") {
+        await db.prepare("UPDATE time_slots SET title=?, start_time=?, end_time=?, is_active=?, custom_data=? WHERE id=?").bind(title, startTime, endTime, isActive, customData, id).run();
+        return Response.json({ ok: true });
+      }
+      const result = await db.prepare("INSERT INTO time_slots (title, start_time, end_time, is_active, custom_data) VALUES (?, ?, ?, ?, ?)").bind(title, startTime, endTime, isActive, customData).run();
+      return Response.json({ id: result.meta.last_row_id }, { status: 201 });
+    }
+
+    if (action === "deleteTimeSlot") {
+      await db.prepare("DELETE FROM time_slots WHERE id=?").bind(Number(payload.id)).run();
+      return Response.json({ ok: true });
+    }
+
     if (action === "createDepartment") {
       const name = String(payload.name ?? "").trim();
       if (!name) return Response.json({ error: "اسم القسم مطلوب" }, { status: 400 });
@@ -155,7 +184,7 @@ export async function POST(request: Request) {
       const label = String(payload.label ?? "").trim();
       if (!label) return Response.json({ error: "اسم الحقل مطلوب" }, { status: 400 });
       const requestedForm = String(payload.formKey ?? "employee");
-      const allowedForms = new Set(["employee", "branch", "classroom", "track", "lead", "call", "lead_details", "followup"]);
+      const allowedForms = new Set(["employee", "branch", "classroom", "track", "time_slot", "lead", "call", "lead_details", "followup"]);
       if (!allowedForms.has(requestedForm)) return Response.json({ error: "النموذج المطلوب غير مدعوم" }, { status: 400 });
       const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key=?").bind(requestedForm).first<{ id: number }>();
       if (!form) throw new Error("تعريف النموذج غير موجود");

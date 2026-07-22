@@ -57,6 +57,13 @@
       "when": 1784728516977,
       "tag": "0007_unusual_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784729632763,
+      "tag": "0008_colossal_wallow",
+      "breakpoints": true
     }
   ]
 }

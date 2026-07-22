@@ -64,6 +64,16 @@ export const tracks = sqliteTable("tracks", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const timeSlots = sqliteTable("time_slots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const employees = sqliteTable("employees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fullName: text("full_name").notNull(),
@@ -94,7 +104,7 @@ export const formFields = sqliteTable("form_fields", {
   formId: integer("form_id").notNull().references(() => formDefinitions.id),
   fieldKey: text("field_key").notNull(),
   label: text("label").notNull(),
-  type: text("type", { enum: ["text", "email", "tel", "number", "date", "datetime-local", "select", "textarea", "checkbox"] }).notNull(),
+  type: text("type", { enum: ["text", "email", "tel", "number", "date", "time", "datetime-local", "select", "textarea", "checkbox"] }).notNull(),
   placeholder: text("placeholder").notNull().default(""),
   required: integer("required", { mode: "boolean" }).notNull().default(false),
   visible: integer("visible", { mode: "boolean" }).notNull().default(true),
