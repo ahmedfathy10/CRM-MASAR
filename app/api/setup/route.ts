@@ -173,8 +173,11 @@ export async function POST(request: Request) {
       const id=Number(payload.id), role=String(payload.role), employeeId=Number(payload.employeeId);
       if(!id||!["teacher","admin"].includes(role)||!employeeId) return Response.json({error:"بيانات الموظف غير مكتملة"},{status:400});
       const group=await db.prepare("SELECT custom_data AS customData FROM settings_entities WHERE id=? AND kind='group'").bind(id).first<{customData:string}>();
-      const employee=await db.prepare("SELECT id FROM employees WHERE id=? AND status IN ('active','نشط')").bind(employeeId).first();
+      const employee=await db.prepare("SELECT e.id, COALESCE(j.name,'') AS jobTitle, COALESCE(d.name,'') AS department FROM employees e LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN departments d ON d.id=e.department_id WHERE e.id=? AND e.status IN ('active','نشط')").bind(employeeId).first<{id:number;jobTitle:string;department:string}>();
       if(!group||!employee) return Response.json({error:"الجروب أو الموظف غير موجود"},{status:404});
+      const employeeScope=`${employee.jobTitle} ${employee.department}`.toLowerCase();
+      if(role==="teacher"&&!/(english|german|انجليزى|انجليزي|الماني|ألماني)/i.test(employeeScope)) return Response.json({error:"اختيار المدرس متاح فقط لفريق English وGerman"},{status:400});
+      if(role==="admin"&&!/(operation|operations|تشغيل|اوبريشن)/i.test(employeeScope)) return Response.json({error:"اختيار الأدمن متاح فقط لفريق Operations"},{status:400});
       const details=JSON.parse(group.customData||"{}") as Record<string,unknown>; details[`${role}Id`]=employeeId;
       await db.prepare("UPDATE settings_entities SET custom_data=? WHERE id=?").bind(JSON.stringify(details),id).run();
       return Response.json({ok:true});
