@@ -8,10 +8,12 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL REFERENCES roles(id), resource TEXT NOT NULL, action TEXT NOT NULL, allowed INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS branches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', primary_phone TEXT NOT NULL DEFAULT '', secondary_phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', social_url TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS classrooms (id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL REFERENCES branches(id), name TEXT NOT NULL, capacity INTEGER NOT NULL DEFAULT 1, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_definitions (id INTEGER PRIMARY KEY AUTOINCREMENT, form_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_fields (id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER NOT NULL REFERENCES form_definitions(id), field_key TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL, placeholder TEXT NOT NULL DEFAULT '', required INTEGER NOT NULL DEFAULT 0, visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL DEFAULT '[]', width TEXT NOT NULL DEFAULT 'half')`,
   `CREATE INDEX IF NOT EXISTS employees_department_idx ON employees (department_id)`,
+  `CREATE INDEX IF NOT EXISTS classrooms_branch_idx ON classrooms (branch_id)`,
   `CREATE INDEX IF NOT EXISTS form_fields_form_idx ON form_fields (form_id, sort_order)`,
 ];
 
@@ -47,6 +49,13 @@ const branchFields: FieldSeed[] = [
   ["email", "البريد الإلكتروني", "email", "branch@company.com", 0, 1, 5, "half", "[]"],
   ["socialUrl", "صفحة التواصل الاجتماعي", "text", "https://...", 0, 1, 6, "half", "[]"],
   ["isActive", "حالة الفرع", "select", "اختر الحالة", 1, 1, 7, "full", '["نشط","غير نشط"]'],
+];
+
+const classroomFields: FieldSeed[] = [
+  ["name", "اسم القاعة", "text", "مثال: Room 1", 1, 1, 1, "full", "[]"],
+  ["branchId", "الفرع", "select", "اختر الفرع", 1, 1, 2, "half", "[]"],
+  ["capacity", "السعة", "number", "عدد الطلاب", 1, 1, 3, "half", "[]"],
+  ["isActive", "الحالة", "select", "اختر الحالة", 1, 1, 4, "full", '["نشط","غير نشط"]'],
 ];
 
 export async function ensureDatabase() {
@@ -103,6 +112,7 @@ async function initialize() {
 
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('employee', 'بيانات الموظف', 'الحقول المستخدمة عند إضافة أو تعديل موظف')").run();
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('branch', 'بيانات الفرع', 'الحقول المستخدمة عند إضافة أو تعديل فرع')").run();
+  await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('classroom', 'بيانات القاعة', 'الحقول المستخدمة عند إضافة أو تعديل قاعة')").run();
   const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'employee'").first<{ id: number }>();
   if (!form) return;
   await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key='branch'").bind(form.id).run();
@@ -110,4 +120,6 @@ async function initialize() {
   await db.batch(employeeFields.map((field) => db.prepare(query).bind(form.id, ...field)));
   const branchForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'branch'").first<{ id: number }>();
   if (branchForm) await db.batch(branchFields.map((field) => db.prepare(query).bind(branchForm.id, ...field)));
+  const classroomForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'classroom'").first<{ id: number }>();
+  if (classroomForm) await db.batch(classroomFields.map((field) => db.prepare(query).bind(classroomForm.id, ...field)));
 }

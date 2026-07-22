@@ -7,15 +7,16 @@ export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
-    const [departments, jobTitles, roles, employees, branches, forms] = await Promise.all([
+    const [departments, jobTitles, roles, employees, branches, classrooms, forms] = await Promise.all([
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
       db.prepare(`SELECT e.id, e.full_name AS fullName, e.email, e.phone, e.status, e.department_id AS departmentId, e.job_title_id AS jobTitleId, e.role_id AS roleId, e.branch_id AS branchId, d.name AS department, j.name AS jobTitle, r.name AS role, b.name AS branchName FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN roles r ON r.id=e.role_id LEFT JOIN branches b ON b.id=e.branch_id ORDER BY e.id DESC`).all(),
       db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
-      db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('employee','branch') ORDER BY f.form_key, ff.sort_order`).all(),
+      db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
+      db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('employee','branch','classroom') ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
-    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch") });
+    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom") });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "تعذر تحميل البيانات" }, { status: 500 });
   }
@@ -55,9 +56,30 @@ export async function POST(request: Request) {
 
     if (action === "deleteBranch") {
       const id = Number(payload.id);
-      const usage = await db.prepare("SELECT (SELECT COUNT(*) FROM employees WHERE branch_id=?) + (SELECT COUNT(*) FROM leads WHERE branch_id=?) + (SELECT COUNT(*) FROM call_records WHERE branch_id=?) AS count").bind(id, id, id).first<{ count: number }>();
-      if ((usage?.count ?? 0) > 0) return Response.json({ error: "لا يمكن حذف فرع مرتبط بموظفين أو عملاء أو مكالمات. يمكنك تعطيله بدلًا من ذلك." }, { status: 409 });
+      const usage = await db.prepare("SELECT (SELECT COUNT(*) FROM employees WHERE branch_id=?) + (SELECT COUNT(*) FROM leads WHERE branch_id=?) + (SELECT COUNT(*) FROM call_records WHERE branch_id=?) + (SELECT COUNT(*) FROM classrooms WHERE branch_id=?) AS count").bind(id, id, id, id).first<{ count: number }>();
+      if ((usage?.count ?? 0) > 0) return Response.json({ error: "لا يمكن حذف فرع مرتبط بموظفين أو عملاء أو مكالمات أو قاعات. يمكنك تعطيله بدلًا من ذلك." }, { status: 409 });
       await db.prepare("DELETE FROM branches WHERE id=?").bind(id).run();
+      return Response.json({ ok: true });
+    }
+
+    if (action === "createClassroom" || action === "updateClassroom") {
+      const name = String(payload.name ?? "").trim();
+      const branchId = Number(payload.branchId);
+      const capacity = Number(payload.capacity);
+      if (!name || !branchId || !Number.isInteger(capacity) || capacity < 1) return Response.json({ error: "اسم القاعة والفرع وسعة صحيحة مطلوبة" }, { status: 400 });
+      const rawStatus = payload.isActive;
+      const isActive = rawStatus === false || rawStatus === 0 || rawStatus === "0" || rawStatus === "غير نشط" || rawStatus === "inactive" ? 0 : 1;
+      const customData = JSON.stringify(payload.customData ?? {});
+      if (action === "updateClassroom") {
+        await db.prepare("UPDATE classrooms SET name=?, branch_id=?, capacity=?, is_active=?, custom_data=? WHERE id=?").bind(name, branchId, capacity, isActive, customData, Number(payload.id)).run();
+        return Response.json({ ok: true });
+      }
+      const result = await db.prepare("INSERT INTO classrooms (name, branch_id, capacity, is_active, custom_data) VALUES (?, ?, ?, ?, ?)").bind(name, branchId, capacity, isActive, customData).run();
+      return Response.json({ id: result.meta.last_row_id }, { status: 201 });
+    }
+
+    if (action === "deleteClassroom") {
+      await db.prepare("DELETE FROM classrooms WHERE id=?").bind(Number(payload.id)).run();
       return Response.json({ ok: true });
     }
 
@@ -106,7 +128,7 @@ export async function POST(request: Request) {
       const label = String(payload.label ?? "").trim();
       if (!label) return Response.json({ error: "اسم الحقل مطلوب" }, { status: 400 });
       const requestedForm = String(payload.formKey ?? "employee");
-      const allowedForms = new Set(["employee", "branch", "lead", "call", "lead_details", "followup"]);
+      const allowedForms = new Set(["employee", "branch", "classroom", "lead", "call", "lead_details", "followup"]);
       if (!allowedForms.has(requestedForm)) return Response.json({ error: "النموذج المطلوب غير مدعوم" }, { status: 400 });
       const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key=?").bind(requestedForm).first<{ id: number }>();
       if (!form) throw new Error("تعريف النموذج غير موجود");

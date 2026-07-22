@@ -43,6 +43,13 @@
       "when": 1784679796616,
       "tag": "0005_known_shotgun",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784727588280,
+      "tag": "0006_light_guardsmen",
+      "breakpoints": true
     }
   ]
 }

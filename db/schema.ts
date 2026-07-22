@@ -46,6 +46,16 @@ export const branches = sqliteTable("branches", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const classrooms = sqliteTable("classrooms", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  branchId: integer("branch_id").notNull().references(() => branches.id),
+  name: text("name").notNull(),
+  capacity: integer("capacity").notNull().default(1),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const employees = sqliteTable("employees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fullName: text("full_name").notNull(),
