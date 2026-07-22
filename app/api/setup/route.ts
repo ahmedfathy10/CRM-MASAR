@@ -237,6 +237,17 @@ export async function POST(request: Request) {
       return Response.json({ id: result.meta.last_row_id }, { status: 201 });
     }
 
+    if (action === "updateJobTitle") {
+      const id = Number(payload.id);
+      const name = String(payload.name ?? "").trim();
+      const departmentId = Number(payload.departmentId);
+      if (!id || !name || !departmentId) return Response.json({ error: "اسم الوظيفة والقسم مطلوبان" }, { status: 400 });
+      const duplicate = await db.prepare("SELECT id FROM job_titles WHERE department_id=? AND LOWER(name)=LOWER(?) AND id<>?").bind(departmentId, name, id).first();
+      if (duplicate) return Response.json({ error: "توجد وظيفة بنفس الاسم داخل هذا القسم" }, { status: 409 });
+      await db.prepare("UPDATE job_titles SET name=?, department_id=? WHERE id=?").bind(name, departmentId, id).run();
+      return Response.json({ ok: true });
+    }
+
     if (action === "deleteDepartment") {
       const id = Number(payload.id);
       const usage = await db.prepare("SELECT (SELECT COUNT(*) FROM employees WHERE department_id=?) + (SELECT COUNT(*) FROM job_titles WHERE department_id=?) + (SELECT COUNT(*) FROM departments WHERE parent_id=?) AS count").bind(id, id, id).first<{ count: number }>();
