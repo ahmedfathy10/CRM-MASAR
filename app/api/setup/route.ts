@@ -7,10 +7,11 @@ export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
-    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, settingsEntities, forms, students, groupMembers] = await Promise.all([
+    const [departments, jobTitles, roles, jobTitlePermissions, employees, branches, classrooms, tracks, timeSlots, settingsEntities, forms, students, groupMembers] = await Promise.all([
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, j.reports_to_id AS reportsToId, d.name AS department, manager.name AS reportsToName FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id LEFT JOIN job_titles manager ON manager.id=j.reports_to_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
+      db.prepare("SELECT job_title_id AS jobTitleId, page_key AS pageKey, can_view AS canView, can_add AS canAdd, can_edit AS canEdit, can_delete AS canDelete FROM job_title_permissions ORDER BY job_title_id, page_key").all(),
       db.prepare(`SELECT e.id, e.hr_id AS hrId, e.full_name AS fullName, e.email, e.phone, e.status, e.custom_data AS customData, e.department_id AS departmentId, e.job_title_id AS jobTitleId, e.role_id AS roleId, e.branch_id AS branchId, d.name AS department, j.name AS jobTitle, r.name AS role, b.name AS branchName FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN roles r ON r.id=e.role_id LEFT JOIN branches b ON b.id=e.branch_id ORDER BY e.id DESC`).all(),
       db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
       db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
@@ -21,7 +22,7 @@ export async function GET() {
       db.prepare(`SELECT s.id, s.full_name AS fullName, s.mobile, s.level_id AS levelId, l.title AS levelName FROM students s LEFT JOIN settings_entities l ON l.id=s.level_id ORDER BY s.full_name`).all(),
       db.prepare(`SELECT gm.id, gm.group_id AS groupId, CAST(gm.student_reference AS INTEGER) AS studentId, gm.joined_at AS joinedAt, s.full_name AS fullName, s.mobile, s.level_id AS levelId FROM group_members gm JOIN students s ON s.id=CAST(gm.student_reference AS INTEGER) ORDER BY gm.joined_at DESC`).all(),
     ]);
-    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, settingsEntities: settingsEntities.results, students:students.results, groupMembers:groupMembers.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot"), catalogFields: Object.fromEntries(["round","study_type","level","education_batch","group","setup_card","exam"].map((key)=>[key,forms.results.filter((field)=>field.formKey===key)])) });
+    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, jobTitlePermissions: jobTitlePermissions.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, settingsEntities: settingsEntities.results, students:students.results, groupMembers:groupMembers.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot"), catalogFields: Object.fromEntries(["round","study_type","level","education_batch","group","setup_card","exam"].map((key)=>[key,forms.results.filter((field)=>field.formKey===key)])) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "تعذر تحميل البيانات" }, { status: 500 });
   }
@@ -322,7 +323,26 @@ export async function POST(request: Request) {
       const id = Number(payload.id);
       const usage = await db.prepare("SELECT (SELECT COUNT(*) FROM employees WHERE job_title_id=?) + (SELECT COUNT(*) FROM job_titles WHERE reports_to_id=?) AS count").bind(id, id).first<{ count: number }>();
       if ((usage?.count ?? 0) > 0) return Response.json({ error: "لا يمكن حذف وظيفة مرتبطة بموظفين" }, { status: 409 });
+      await db.prepare("DELETE FROM job_title_permissions WHERE job_title_id=?").bind(id).run();
       await db.prepare("DELETE FROM job_titles WHERE id=?").bind(id).run();
+      return Response.json({ ok: true });
+    }
+
+    if (action === "saveJobTitlePermissions") {
+      const jobTitleId = Number(payload.jobTitleId);
+      const allowedPages = new Set(["overview", "employees", "departments", "jobs", "permissions", "settings", "classes", "tracks", "timeSystem", "rounds", "studyTypes", "levels", "batches", "groups", "leads", "inboundCalls", "followups", "receivedFollowups", "callCenterCalls"]);
+      const submitted = Array.isArray(payload.permissions) ? payload.permissions : [];
+      if (!jobTitleId) return Response.json({ error: "اختر الوظيفة أولاً" }, { status: 400 });
+      if (!await db.prepare("SELECT id FROM job_titles WHERE id=?").bind(jobTitleId).first()) return Response.json({ error: "الوظيفة المحددة غير موجودة" }, { status: 404 });
+      const permissions = submitted.map((item) => {
+        const row = item as Record<string, unknown>;
+        const canView = !!row.canView;
+        return { pageKey: String(row.pageKey ?? ""), canView, canAdd: canView && !!row.canAdd, canEdit: canView && !!row.canEdit, canDelete: canView && !!row.canDelete };
+      }).filter((row) => allowedPages.has(row.pageKey));
+      await db.batch([
+        db.prepare("DELETE FROM job_title_permissions WHERE job_title_id=?").bind(jobTitleId),
+        ...permissions.map((row) => db.prepare("INSERT INTO job_title_permissions (job_title_id, page_key, can_view, can_add, can_edit, can_delete) VALUES (?, ?, ?, ?, ?, ?)").bind(jobTitleId, row.pageKey, row.canView ? 1 : 0, row.canAdd ? 1 : 0, row.canEdit ? 1 : 0, row.canDelete ? 1 : 0)),
+      ]);
       return Response.json({ ok: true });
     }
 

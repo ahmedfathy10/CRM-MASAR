@@ -34,6 +34,16 @@ export const rolePermissions = sqliteTable("role_permissions", {
   allowed: integer("allowed", { mode: "boolean" }).notNull().default(false),
 });
 
+export const jobTitlePermissions = sqliteTable("job_title_permissions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  jobTitleId: integer("job_title_id").notNull().references(() => jobTitles.id),
+  pageKey: text("page_key").notNull(),
+  canView: integer("can_view", { mode: "boolean" }).notNull().default(false),
+  canAdd: integer("can_add", { mode: "boolean" }).notNull().default(false),
+  canEdit: integer("can_edit", { mode: "boolean" }).notNull().default(false),
+  canDelete: integer("can_delete", { mode: "boolean" }).notNull().default(false),
+}, (table) => [uniqueIndex("job_title_permissions_unique_idx").on(table.jobTitleId, table.pageKey)]);
+
 export const branches = sqliteTable("branches", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
