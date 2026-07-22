@@ -10,7 +10,7 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS branches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', primary_phone TEXT NOT NULL DEFAULT '', secondary_phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', social_url TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS classrooms (id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL REFERENCES branches(id), name TEXT NOT NULL, capacity INTEGER NOT NULL DEFAULT 1, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-  `CREATE TABLE IF NOT EXISTS time_slots (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS time_slots (id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER REFERENCES tracks(id), title TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS settings_entities (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, title TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS settings_entities_kind_idx ON settings_entities (kind, title)`,
   `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
@@ -69,9 +69,10 @@ const trackFields: FieldSeed[] = [
 
 const timeSlotFields: FieldSeed[] = [
   ["title", "اسم الفترة", "text", "مثال: الفترة الصباحية", 1, 1, 1, "full", "[]"],
-  ["startTime", "وقت البداية", "time", "", 1, 1, 2, "half", "[]"],
-  ["endTime", "وقت النهاية", "time", "", 1, 1, 3, "half", "[]"],
-  ["isActive", "الحالة", "select", "اختر الحالة", 1, 1, 4, "full", '["نشط","غير نشط"]'],
+  ["trackId", "الـTrack", "select", "اختر الـTrack", 1, 1, 2, "full", "[]"],
+  ["startTime", "وقت البداية", "time", "", 1, 1, 3, "half", "[]"],
+  ["endTime", "وقت النهاية", "time", "", 1, 1, 4, "half", "[]"],
+  ["isActive", "الحالة", "select", "اختر الحالة", 1, 1, 5, "full", '["نشط","غير نشط"]'],
 ];
 
 const catalogForms:{key:string;name:string;description:string;fields:FieldSeed[]}[] = [
@@ -104,6 +105,8 @@ async function initialize() {
   await db.prepare("CREATE INDEX IF NOT EXISTS employees_branch_idx ON employees (branch_id)").run();
   const branchColumns = await db.prepare("PRAGMA table_info(branches)").all<{ name: string }>();
   if (!branchColumns.results.some((column) => column.name === "custom_data")) await db.prepare("ALTER TABLE branches ADD COLUMN custom_data TEXT NOT NULL DEFAULT '{}'").run();
+  const timeSlotColumns = await db.prepare("PRAGMA table_info(time_slots)").all<{ name: string }>();
+  if (!timeSlotColumns.results.some((column) => column.name === "track_id")) await db.prepare("ALTER TABLE time_slots ADD COLUMN track_id INTEGER REFERENCES tracks(id)").run();
 
   const branchCount = await db.prepare("SELECT COUNT(*) AS count FROM branches").first<{ count: number }>();
   if ((branchCount?.count ?? 0) === 0) await db.batch([

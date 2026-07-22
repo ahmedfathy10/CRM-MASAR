@@ -66,6 +66,7 @@ export const tracks = sqliteTable("tracks", {
 
 export const timeSlots = sqliteTable("time_slots", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  trackId: integer("track_id").references(() => tracks.id),
   title: text("title").notNull(),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),

@@ -15,7 +15,7 @@ export async function GET() {
       db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
       db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
       db.prepare(`SELECT id, title, is_active AS isActive, custom_data AS customData FROM tracks ORDER BY title`).all(),
-      db.prepare(`SELECT id, title, start_time AS startTime, end_time AS endTime, is_active AS isActive, custom_data AS customData FROM time_slots ORDER BY start_time`).all(),
+      db.prepare(`SELECT ts.id, ts.track_id AS trackId, t.title AS trackName, ts.title, ts.start_time AS startTime, ts.end_time AS endTime, ts.is_active AS isActive, ts.custom_data AS customData FROM time_slots ts LEFT JOIN tracks t ON t.id=ts.track_id ORDER BY t.title, ts.start_time`).all(),
       db.prepare(`SELECT id, kind, title, is_active AS isActive, custom_data AS customData FROM settings_entities ORDER BY kind, title`).all(),
       db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
@@ -114,24 +114,25 @@ export async function POST(request: Request) {
 
     if (action === "createTimeSlot" || action === "updateTimeSlot") {
       const title = String(payload.title ?? "").trim();
+      const trackId = Number(payload.trackId);
       const startTime = String(payload.startTime ?? "").trim();
       const endTime = String(payload.endTime ?? "").trim();
       const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
-      if (!title || !timePattern.test(startTime) || !timePattern.test(endTime)) return Response.json({ error: "اسم الفترة ووقت بداية ونهاية صحيحان مطلوبون" }, { status: 400 });
+      if (!title || !trackId || !timePattern.test(startTime) || !timePattern.test(endTime)) return Response.json({ error: "الـTrack واسم الفترة ووقت بداية ونهاية صحيحان مطلوبون" }, { status: 400 });
       if (startTime >= endTime) return Response.json({ error: "وقت النهاية يجب أن يكون بعد وقت البداية" }, { status: 400 });
       const id = action === "updateTimeSlot" ? Number(payload.id) : 0;
-      const duplicate = await db.prepare("SELECT id FROM time_slots WHERE LOWER(title)=LOWER(?) AND id<>?").bind(title, id).first();
-      if (duplicate) return Response.json({ error: "يوجد نظام وقت بنفس الاسم" }, { status: 409 });
-      const overlap = await db.prepare("SELECT id FROM time_slots WHERE id<>? AND is_active=1 AND NOT (end_time<=? OR start_time>=?)").bind(id, startTime, endTime).first();
+      const duplicate = await db.prepare("SELECT id FROM time_slots WHERE track_id=? AND LOWER(title)=LOWER(?) AND id<>?").bind(trackId, title, id).first();
+      if (duplicate) return Response.json({ error: "يوجد نظام وقت بنفس الاسم داخل هذا الـTrack" }, { status: 409 });
+      const overlap = await db.prepare("SELECT id FROM time_slots WHERE id<>? AND track_id=? AND is_active=1 AND NOT (end_time<=? OR start_time>=?)").bind(id, trackId, startTime, endTime).first();
       const rawStatus = payload.isActive;
       const isActive = rawStatus === false || rawStatus === 0 || rawStatus === "0" || rawStatus === "غير نشط" || rawStatus === "inactive" ? 0 : 1;
       if (isActive && overlap) return Response.json({ error: "الفترة الزمنية تتداخل مع فترة نشطة موجودة" }, { status: 409 });
       const customData = JSON.stringify(payload.customData ?? {});
       if (action === "updateTimeSlot") {
-        await db.prepare("UPDATE time_slots SET title=?, start_time=?, end_time=?, is_active=?, custom_data=? WHERE id=?").bind(title, startTime, endTime, isActive, customData, id).run();
+        await db.prepare("UPDATE time_slots SET track_id=?, title=?, start_time=?, end_time=?, is_active=?, custom_data=? WHERE id=?").bind(trackId, title, startTime, endTime, isActive, customData, id).run();
         return Response.json({ ok: true });
       }
-      const result = await db.prepare("INSERT INTO time_slots (title, start_time, end_time, is_active, custom_data) VALUES (?, ?, ?, ?, ?)").bind(title, startTime, endTime, isActive, customData).run();
+      const result = await db.prepare("INSERT INTO time_slots (track_id, title, start_time, end_time, is_active, custom_data) VALUES (?, ?, ?, ?, ?, ?)").bind(trackId, title, startTime, endTime, isActive, customData).run();
       return Response.json({ id: result.meta.last_row_id }, { status: 201 });
     }
 

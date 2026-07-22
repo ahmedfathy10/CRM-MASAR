@@ -1,0 +1,1 @@
+ALTER TABLE `time_slots` ADD `track_id` integer REFERENCES tracks(id);
