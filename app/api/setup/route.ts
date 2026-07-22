@@ -217,6 +217,18 @@ export async function POST(request: Request) {
       return Response.json({ id: result.meta.last_row_id }, { status: 201 });
     }
 
+    if (action === "updateDepartment") {
+      const id = Number(payload.id);
+      const name = String(payload.name ?? "").trim();
+      const parentId = Number(payload.parentId) || null;
+      if (!id || !name) return Response.json({ error: "اسم القسم مطلوب" }, { status: 400 });
+      if (parentId === id) return Response.json({ error: "لا يمكن أن يكون القسم الرئيسي هو القسم نفسه" }, { status: 400 });
+      const duplicate = await db.prepare("SELECT id FROM departments WHERE LOWER(name)=LOWER(?) AND id<>?").bind(name, id).first();
+      if (duplicate) return Response.json({ error: "يوجد قسم بنفس الاسم بالفعل" }, { status: 409 });
+      await db.prepare("UPDATE departments SET name=?, color=?, parent_id=?, support_enabled=? WHERE id=?").bind(name, String(payload.color ?? "#2f6b5f"), parentId, payload.supportEnabled ? 1 : 0, id).run();
+      return Response.json({ ok: true });
+    }
+
     if (action === "createJobTitle") {
       const name = String(payload.name ?? "").trim();
       const departmentId = Number(payload.departmentId);
