@@ -12,7 +12,7 @@ type Lead = { id: number; fullName: string; primaryPhone: string; secondaryPhone
 type CallRecord = { id: number; leadId: number | null; phone: string; direction: string; result: string; assignedEmployeeId: number; assignedEmployee: string; leadName: string | null; branchId: number; branchName: string; callAt: string; notes: string };
 type Followup = { id: number; leadId: number; leadName: string; leadPhone: string; assignedEmployeeId: number; assignedEmployee: string; branchId: number; branchName: string; scheduledAt: string; channel: string; status: string; priority: string; notes: string; outcome: string; completedAt: string | null; createdAt: string };
 type Setup = { departments: Department[]; jobTitles: JobTitle[]; roles: Role[]; employees: Employee[]; branches: Branch[]; fields: Field[]; branchFields: Field[]; leads: Lead[]; calls: CallRecord[]; followups: Followup[]; leadFields: Field[]; callFields: Field[]; leadDetailsFields: Field[]; followupFields: Field[] };
-type Tab = "overview" | "departments" | "jobs" | "employees" | "leaves" | "permissions" | "forms" | "settings" | "leads" | "inboundCalls" | "followups" | "receivedFollowups" | "callCenterCalls";
+type Tab = "overview" | "departments" | "jobs" | "employees" | "leaves" | "permissions" | "forms" | "settings" | "leads" | "inboundCalls" | "followups" | "receivedFollowups" | "callCenterCalls" | "placeholder";
 type Dialog = "employee" | "department" | "job" | "field" | "branch" | "lead" | "call" | "leadDetails" | "callResult" | "leadHistory" | "scheduleFollowup" | "completeFollowup" | "rescheduleFollowup" | null;
 
 const emptySetup: Setup = { departments: [], jobTitles: [], roles: [], employees: [], branches: [], fields: [], branchFields: [], leads: [], calls: [], followups: [], leadFields: [], callFields: [], leadDetailsFields: [], followupFields: [] };
@@ -21,48 +21,42 @@ const titles: Record<Tab, [string, string]> = {
   leads: ["العملاء المحتملون", "تسجيل وتوزيع الـLeads ومتابعة حالتها الأولية"], inboundCalls: ["المكالمات الواردة", "المكالمات التي استقبلها فريق خدمة العملاء"], callCenterCalls: ["مكالمات الكول سنتر", "سجل المكالمات الواردة والصادرة وربطها بالعملاء"],
   settings: ["Settings", "إدارة بيانات الفروع التي تظهر في الموظفين والعملاء والمكالمات"],
   followups: ["Leads Followup", "جدولة ومتابعة كل المواعيد القادمة مع العملاء"], receivedFollowups: ["Received Followup", "المتابعات المستحقة والمتأخرة التي تحتاج إجراءً الآن"],
+  placeholder: ["Coming Soon", "تمت إضافة الصفحة إلى هيكل النظام وستُفعّل في مرحلتها"],
 };
+
+type MenuEntry={label:string;tab?:Tab}; type MenuGroupDefinition={label:string;icon:string;items:MenuEntry[]};
+const sidebarGroups:MenuGroupDefinition[]=[
+  {label:"Reports",icon:"▥",items:[{label:"Exam Results"},{label:"Oral Results"},{label:"Misplaced Report"},{label:"Retention Report"},{label:"Retention Status"},{label:"Retention Dashboard"},{label:"Students Status"},{label:"Marketing Expenses"},{label:"Total Offers"},{label:"Marketing Masseges"},{label:"LIC-Sales MTD"},{label:"Leads Reports"},{label:"Calls Reports"}]},
+  {label:"Settings",icon:"⚙",items:[{label:"Locations",tab:"settings"},{label:"Classes"},{label:"Courses"},{label:"Time System"},{label:"Rounds"},{label:"Study Types"},{label:"Levels"},{label:"Education Batches"},{label:"Groups"},{label:"Employees Previliges",tab:"permissions"},{label:"Admin Settings",tab:"forms"},{label:"Setup Cards"}]},
+  {label:"Exams Manager",icon:"▤",items:[{label:"Exams"},{label:"Questions"},{label:"Instructions"}]},
+  {label:"Quizzes Manager",icon:"?",items:[{label:"Quizzes"},{label:"Quizzes Questions"},{label:"Quizzes Instructions"}]},
+  {label:"Content Manager",icon:"▣",items:[{label:"Extra Content"},{label:"Student Books"},{label:"Material Audios"},{label:"Material Videos"},{label:"Videos Questions"}]},
+  {label:"Books Inventory",icon:"▧",items:[{label:"Stock Items"},{label:"Movements"},{label:"Branch Stock"}]},
+  {label:"Customer Care",icon:"☎",items:[{label:"Leads",tab:"leads"},{label:"Inbound calls",tab:"inboundCalls"},{label:"Leads Followup",tab:"followups"},{label:"Received Followup",tab:"receivedFollowups"},{label:"Call Center Calls",tab:"callCenterCalls"},{label:"Support Tickets"},{label:"Recommendation"},{label:"Chat Boxes"}]},
+  {label:"Students",icon:"♙",items:[{label:"Profile"},{label:"Students List"},{label:"Attendance"},{label:"Absence Report"},{label:"Placement Test"},{label:"Complaints"},{label:"Informations"}]},
+  {label:"Employees Manager",icon:"≡",items:[{label:"Departments",tab:"departments"},{label:"Roles",tab:"jobs"},{label:"Leaves",tab:"leaves"},{label:"Employees",tab:"employees"}]},
+  {label:"Supervions",icon:"◉",items:[{label:"Cards"},{label:"Rating Teachers"},{label:"Admin Calls"},{label:"Frontdesk Calls"},{label:"Admin Performance"},{label:"Frontdesk Performance"},{label:"Debtors Calls"},{label:"Visitors Calls"},{label:"Missing Calls"},{label:"NotRegistered Calls"},{label:"Remaining Calls"}]},
+  {label:"Financial Dep.",icon:"£",items:[{label:"Offers"},{label:"Payment Methods"},{label:"Payments"},{label:"Debtors"},{label:"Debts Reset"},{label:"Expenses"},{label:"Refunds"}]},
+];
 
 export function CrmShell() {
   const [tab, setTab] = useState<Tab>("overview"); const [data, setData] = useState<Setup>(emptySetup); const [loading, setLoading] = useState(true); const [dialog, setDialog] = useState<Dialog>(null); const [notice, setNotice] = useState("");
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
   const [selectedFollowup, setSelectedFollowup] = useState<Followup | null>(null);
+  const [plannedPage,setPlannedPage]=useState({group:"",label:""});
   async function load() { const [setupResponse, salesResponse] = await Promise.all([fetch("/api/setup", { cache: "no-store" }), fetch("/api/leads", { cache: "no-store" })]); const setup = await setupResponse.json(); const sales = await salesResponse.json(); if (!setupResponse.ok) throw new Error(setup.error || "تعذر تحميل البيانات"); if (!salesResponse.ok) throw new Error(sales.error || "تعذر تحميل العملاء"); setData({ ...setup, ...sales }); }
   useEffect(() => { load().catch((error) => setNotice(error.message)).finally(() => setLoading(false)); }, []);
   async function mutate(payload: Record<string, unknown>) { const response = await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "تعذر الحفظ"); await load(); }
   async function mutateSales(payload: Record<string, unknown>) { const response = await fetch("/api/leads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || "تعذر الحفظ"); await load(); return result; }
-  const [title, subtitle] = titles[tab];
+  const [title, subtitle] = tab === "placeholder" ? [plannedPage.label || "Coming Soon", `${plannedPage.group} · تمت إضافة الصفحة إلى هيكل النظام`] : titles[tab];
   return <main className="app-shell" dir="rtl">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">م</span><div><strong>مسار</strong><small>إدارة علاقات العملاء</small></div></div>
       <nav aria-label="التنقل الرئيسي">
         <NavItem active={tab === "overview"} icon="▦" label="Dashboard" onClick={() => setTab("overview")} />
         <div className="nav-separator" />
-        <button className={`nav-group ${["departments","jobs","leaves","employees"].includes(tab) ? "active" : ""}`} onClick={() => setTab("departments")}><span className="nav-icon">≡</span><span><strong>إدارة الموارد البشرية</strong><small>Employees Manager</small></span><b>⌄</b></button>
-        <div className="subnav">
-          <SubNav label="أقسام الشركة" active={tab === "departments"} onClick={() => setTab("departments")} />
-          <SubNav label="الأدوار الوظيفية" active={tab === "jobs"} onClick={() => setTab("jobs")} />
-          <SubNav label="الإجازات" active={tab === "leaves"} onClick={() => setTab("leaves")} />
-          <SubNav label="الموظفون" active={tab === "employees"} onClick={() => setTab("employees")} />
-        </div>
-        <div className="nav-separator" />
-        <NavItem active={tab === "permissions"} icon="⌾" label="الصلاحيات" onClick={() => setTab("permissions")} />
-        <NavItem active={tab === "forms"} icon="▤" label="مصمم النماذج" onClick={() => setTab("forms")} />
-        <div className="nav-separator" />
-        <button className={`nav-group sales ${["leads","inboundCalls","followups","receivedFollowups","callCenterCalls"].includes(tab) ? "active" : ""}`} onClick={() => setTab("leads")}><span className="nav-icon">▣</span><span><strong>Customer Care</strong><small>خدمة العملاء والمبيعات</small></span><b>⌄</b></button>
-        <div className="subnav customer-care-menu">
-          <SubNav label="Leads" active={tab === "leads"} onClick={() => setTab("leads")} />
-          <SubNav label="Inbound Calls" active={tab === "inboundCalls"} onClick={() => setTab("inboundCalls")} />
-          <SubNav label="Leads Followup" active={tab === "followups"} onClick={() => setTab("followups")} badge={String(data.followups.filter((followup) => followup.status === "pending").length)} />
-          <SubNav label="Received Followup" active={tab === "receivedFollowups"} onClick={() => setTab("receivedFollowups")} badge={String(data.followups.filter((followup) => followup.status === "pending" && new Date(followup.scheduledAt).getTime() <= Date.now()).length)} />
-          <SubNav label="Call Center Calls" active={tab === "callCenterCalls"} onClick={() => setTab("callCenterCalls")} />
-          <SubNav label="Support Tickets" disabled />
-          <SubNav label="Recommendation" disabled />
-          <SubNav label="Chat Boxes" disabled />
-        </div>
-        <NavItem disabled icon="◫" label="المدفوعات" badge="المرحلة 4" /><NavItem disabled icon="◎" label="الجروبات" badge="المرحلة 5" />
-        <div className="nav-separator" /><NavItem active={tab === "settings"} icon="⚙" label="Settings" onClick={() => setTab("settings")} />
+        {sidebarGroups.map((group)=><MenuGroup key={group.label} group={group} tab={tab} plannedPage={plannedPage} onSelect={(entry)=>{if(entry.tab){setTab(entry.tab)}else{setPlannedPage({group:group.label,label:entry.label});setTab("placeholder")}}} badges={{"Leads Followup":data.followups.filter((followup)=>followup.status==="pending").length,"Received Followup":data.followups.filter((followup)=>followup.status==="pending"&&new Date(followup.scheduledAt).getTime()<=Date.now()).length}} />)}
       </nav>
       <div className="phase-card"><span>المرحلة الحالية</span><strong>03 — المتابعات</strong><div className="progress phase-three"><i /></div><small>جدولة المواعيد، تنبيه المستحق وحفظ النتيجة</small></div>
       <div className="profile"><span className="avatar">أم</span><div><strong>أحمد منصور</strong><small>مدير النظام</small></div><button>•••</button></div>
@@ -70,7 +64,7 @@ export function CrmShell() {
     <section className="workspace">
       <header className="topbar"><div><span className="eyebrow">مسار CRM <b>/</b> {["leads","inboundCalls","followups","receivedFollowups","callCenterCalls"].includes(tab) ? "Customer Care" : tab === "settings" ? "Settings" : "الموارد البشرية"}</span><h1>{title}</h1><p className="page-subtitle">{subtitle}</p></div><div className="top-actions"><button className="icon-button">♢<i /></button>{tab === "departments" && <button className="primary" onClick={() => setDialog("department")}>＋ إضافة قسم</button>}{tab === "jobs" && <button className="primary" onClick={() => setDialog("job")}>＋ إضافة وظيفة</button>}{tab === "employees" && <button className="primary" onClick={() => setDialog("employee")}>＋ إضافة موظف</button>}{tab === "forms" && <button className="primary" onClick={() => setDialog("field")}>＋ إضافة حقل</button>}{tab === "settings" && <button className="primary" onClick={() => { setSelectedBranch(null); setDialog("branch"); }}>＋ إضافة فرع</button>}{tab === "leads" && <button className="primary" onClick={() => setDialog("lead")}>＋ تسجيل Lead</button>}{(tab === "inboundCalls" || tab === "callCenterCalls") && <button className="primary" onClick={() => setDialog("call")}>＋ تسجيل مكالمة</button>}</div></header>
       {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
-      {loading ? <Loading /> : <Page tab={tab} data={data} mutate={mutate} open={setDialog} setNotice={setNotice} selectLead={(lead, next) => { setSelectedLead(lead); setDialog(next); }} selectFollowup={(followup, next) => { setSelectedFollowup(followup); setDialog(next); }} editBranch={(branch) => { setSelectedBranch(branch); setDialog("branch"); }} />}
+      {loading ? <Loading /> : <Page tab={tab} data={data} plannedPage={plannedPage} mutate={mutate} open={setDialog} setNotice={setNotice} selectLead={(lead, next) => { setSelectedLead(lead); setDialog(next); }} selectFollowup={(followup, next) => { setSelectedFollowup(followup); setDialog(next); }} editBranch={(branch) => { setSelectedBranch(branch); setDialog("branch"); }} />}
     </section>
     {dialog === "employee" && <EmployeeDialog data={data} onClose={() => setDialog(null)} onSubmit={async (payload) => { await mutate({ action: "createEmployee", ...payload }); setDialog(null); setNotice("تم إنشاء حساب الموظف وإضافة ملفه بنجاح"); }} />}
     {dialog === "department" && <DepartmentDialog departments={data.departments} onClose={() => setDialog(null)} onSubmit={async (payload) => { await mutate({ action: "createDepartment", ...payload }); setDialog(null); setNotice("تمت إضافة القسم وسيظهر الآن في نموذج الموظف"); }} />}
@@ -88,7 +82,7 @@ export function CrmShell() {
   </main>;
 }
 
-function Page({ tab, data, mutate, open, setNotice, selectLead, selectFollowup, editBranch }: { tab: Tab; data: Setup; mutate: (p: Record<string, unknown>) => Promise<void>; open: (d: Dialog) => void; setNotice: (s: string) => void; selectLead: (lead: Lead, dialog: Dialog) => void; selectFollowup: (followup: Followup, dialog: Dialog) => void; editBranch: (branch: Branch) => void }) {
+function Page({ tab, data, plannedPage, mutate, open, setNotice, selectLead, selectFollowup, editBranch }: { tab: Tab; data: Setup; plannedPage:{group:string;label:string}; mutate: (p: Record<string, unknown>) => Promise<void>; open: (d: Dialog) => void; setNotice: (s: string) => void; selectLead: (lead: Lead, dialog: Dialog) => void; selectFollowup: (followup: Followup, dialog: Dialog) => void; editBranch: (branch: Branch) => void }) {
   if (tab === "overview") return <DashboardPage data={data} go={open} />;
   if (tab === "departments") return <Departments data={data} add={() => open("department")} mutate={mutate} setNotice={setNotice} />;
   if (tab === "jobs") return <Jobs data={data} add={() => open("job")} mutate={mutate} setNotice={setNotice} />;
@@ -101,12 +95,16 @@ function Page({ tab, data, mutate, open, setNotice, selectLead, selectFollowup, 
   if (tab === "followups") return <FollowupsPage data={data} mode="all" onAction={selectFollowup} />;
   if (tab === "receivedFollowups") return <FollowupsPage data={data} mode="due" onAction={selectFollowup} />;
   if (tab === "callCenterCalls") return <CallsPage data={data} add={() => open("call")} mode="all" />;
+  if (tab === "placeholder") return <PlannedPage group={plannedPage.group} label={plannedPage.label} />;
   return <FormBuilder fields={data.fields} data={data} mutate={mutate} onAdd={() => open("field")} />;
 }
 
 function SubNav({ label, active=false, disabled=false, badge, onClick }: { label: string; active?: boolean; disabled?: boolean; badge?: string; onClick?: () => void }) { return <button className={`${active ? "active" : ""} ${disabled ? "disabled" : ""}`} onClick={onClick} disabled={disabled}><i /><span>{label}</span>{badge && <em>{badge}</em>}</button>; }
 function NavItem({ active, disabled, icon, label, badge, onClick }: { active?: boolean; disabled?: boolean; icon: string; label: string; badge?: string; onClick?: () => void }) { return <button className={`nav-item ${active ? "active" : ""} ${disabled ? "disabled" : ""}`} onClick={onClick} disabled={disabled}><span className="nav-icon">{icon}</span><span>{label}</span>{badge && <em>{badge}</em>}</button>; }
+function MenuGroup({group,tab,plannedPage,onSelect,badges}:{group:MenuGroupDefinition;tab:Tab;plannedPage:{group:string;label:string};onSelect:(entry:MenuEntry)=>void;badges:Record<string,number>}) { const containsActive=group.items.some((item)=>item.tab===tab)||(tab==="placeholder"&&plannedPage.group===group.label); const [open,setOpen]=useState(group.label==="Customer Care"||group.label==="Employees Manager"||containsActive); useEffect(()=>{if(containsActive)setOpen(true)},[containsActive]); return <div className={`erp-menu-group ${containsActive?"active":""}`}><button className={`nav-group ${containsActive?"active":""}`} onClick={()=>setOpen((value)=>!value)}><span className="nav-icon">{group.icon}</span><span><strong>{group.label}</strong><small>{group.items.length} pages</small></span><b>{open?"⌃":"⌄"}</b></button>{open&&<div className="subnav erp-subnav">{group.items.map((entry)=><SubNav key={entry.label} label={entry.label} active={entry.tab?tab===entry.tab:tab==="placeholder"&&plannedPage.group===group.label&&plannedPage.label===entry.label} badge={badges[entry.label]?String(badges[entry.label]):undefined} onClick={()=>onSelect(entry)}/>)}</div>}</div>; }
 function Loading() { return <div className="loading-grid"><div /><div /><div /><article /></div>; }
+
+function PlannedPage({group,label}:{group:string;label:string}) { return <section className="panel planned-page"><div className="planned-orbit"><span>◇</span><i/><i/><i/></div><div><span className="version">{group}</span><h2>{label}</h2><p>الصفحة موجودة الآن في القائمة الجانبية بنفس ترتيب النظام المرجعي، وسيتم توصيل وظائفها وبياناتها في المرحلة الخاصة بها.</p><div className="planned-features"><span>✓ مكانها ثابت في الصلاحيات</span><span>✓ جاهزة للربط بقاعدة البيانات</span><span>✓ متوافقة مع تصميم النظام</span></div></div></section>; }
 
 function HrOverview({ data, go }: { data: Setup; go: (d: Dialog) => void }) {
   return <div className="content-stack"><section className="metrics"><Metric label="الموظفون" value={data.employees.length} hint="ملفات مسجلة" tone="green" /><Metric label="أقسام الشركة" value={data.departments.length} hint="رئيسية وفرعية" tone="blue" /><Metric label="الأدوار الوظيفية" value={data.jobTitles.length} hint="مرتبطة بالأقسام" tone="orange" /><Metric label="حسابات نشطة" value={data.employees.filter((e) => e.status === "active").length} hint="تعمل على النظام" tone="purple" /></section><section className="hr-map"><div className="hr-intro"><span>نظام موارد بشرية مترابط</span><h2>ابدأ بالهيكل، ثم أضف فريقك</h2><p>القسم يحدد الوظائف المتاحة، والوظيفة ومجموعة الصلاحيات تحددان ما يمكن للموظف رؤيته وتنفيذه داخل النظام.</p></div><div className="flow-cards"><FlowCard n="01" title="أقسام الشركة" text="أضف الأقسام الرئيسية والفرعية" /><b>←</b><FlowCard n="02" title="الأدوار الوظيفية" text="عرّف الوظائف داخل كل قسم" /><b>←</b><FlowCard n="03" title="الموظفون" text="أنشئ الملف والحساب والصلاحيات" /></div><div className="quick-row"><button onClick={() => go("department")}>＋ قسم جديد</button><button onClick={() => go("job")}>＋ وظيفة جديدة</button><button onClick={() => go("employee")}>＋ موظف جديد</button></div></section></div>;
