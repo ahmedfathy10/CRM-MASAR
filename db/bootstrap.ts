@@ -9,6 +9,7 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL REFERENCES roles(id), resource TEXT NOT NULL, action TEXT NOT NULL, allowed INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS branches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', primary_phone TEXT NOT NULL DEFAULT '', secondary_phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', social_url TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS classrooms (id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL REFERENCES branches(id), name TEXT NOT NULL, capacity INTEGER NOT NULL DEFAULT 1, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_definitions (id INTEGER PRIMARY KEY AUTOINCREMENT, form_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_fields (id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER NOT NULL REFERENCES form_definitions(id), field_key TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL, placeholder TEXT NOT NULL DEFAULT '', required INTEGER NOT NULL DEFAULT 0, visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL DEFAULT '[]', width TEXT NOT NULL DEFAULT 'half')`,
@@ -58,6 +59,11 @@ const classroomFields: FieldSeed[] = [
   ["isActive", "الحالة", "select", "اختر الحالة", 1, 1, 4, "full", '["نشط","غير نشط"]'],
 ];
 
+const trackFields: FieldSeed[] = [
+  ["title", "اسم الـTrack", "text", "مثال: English", 1, 1, 1, "full", "[]"],
+  ["isActive", "الحالة", "select", "اختر الحالة", 1, 1, 2, "full", '["نشط","غير نشط"]'],
+];
+
 export async function ensureDatabase() {
   if (!ready) ready = initialize();
   return ready;
@@ -84,6 +90,16 @@ async function initialize() {
     db.prepare("INSERT INTO branches (name, address, primary_phone, email) VALUES (?, ?, ?, ?)").bind("الفرع الرئيسي", "القاهرة", "02 0000 0000", "main@masar.app"),
     db.prepare("INSERT INTO branches (name, address, primary_phone) VALUES (?, ?, ?)").bind("فرع القاهرة الجديدة", "القاهرة الجديدة", "02 0000 0001"),
     db.prepare("INSERT INTO branches (name, address, primary_phone) VALUES (?, ?, ?)").bind("فرع الإسكندرية", "الإسكندرية", "03 0000 0000"),
+  ]);
+
+  const trackCount = await db.prepare("SELECT COUNT(*) AS count FROM tracks").first<{ count: number }>();
+  if ((trackCount?.count ?? 0) === 0) await db.batch([
+    db.prepare("INSERT INTO tracks (title) VALUES (?)").bind("English"),
+    db.prepare("INSERT INTO tracks (title) VALUES (?)").bind("German"),
+    db.prepare("INSERT INTO tracks (title) VALUES (?)").bind("English Kids 1"),
+    db.prepare("INSERT INTO tracks (title) VALUES (?)").bind("English Kids 2"),
+    db.prepare("INSERT INTO tracks (title) VALUES (?)").bind("German Kids 1"),
+    db.prepare("INSERT INTO tracks (title) VALUES (?)").bind("German Kids 2"),
   ]);
 
   const seeded = await db.prepare("SELECT COUNT(*) AS count FROM departments").first<{ count: number }>();
@@ -113,6 +129,7 @@ async function initialize() {
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('employee', 'بيانات الموظف', 'الحقول المستخدمة عند إضافة أو تعديل موظف')").run();
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('branch', 'بيانات الفرع', 'الحقول المستخدمة عند إضافة أو تعديل فرع')").run();
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('classroom', 'بيانات القاعة', 'الحقول المستخدمة عند إضافة أو تعديل قاعة')").run();
+  await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('track', 'بيانات الـTrack', 'الحقول المستخدمة عند إضافة أو تعديل Track')").run();
   const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'employee'").first<{ id: number }>();
   if (!form) return;
   await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key='branch'").bind(form.id).run();
@@ -122,4 +139,6 @@ async function initialize() {
   if (branchForm) await db.batch(branchFields.map((field) => db.prepare(query).bind(branchForm.id, ...field)));
   const classroomForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'classroom'").first<{ id: number }>();
   if (classroomForm) await db.batch(classroomFields.map((field) => db.prepare(query).bind(classroomForm.id, ...field)));
+  const trackForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'track'").first<{ id: number }>();
+  if (trackForm) await db.batch(trackFields.map((field) => db.prepare(query).bind(trackForm.id, ...field)));
 }
