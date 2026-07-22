@@ -193,6 +193,25 @@ export async function POST(request: Request) {
 
     if(action==="removeGroupStudent") { await db.prepare("DELETE FROM group_members WHERE group_id=? AND student_reference=?").bind(Number(payload.groupId),String(payload.studentId)).run(); return Response.json({ok:true}); }
 
+    if(action==="deleteEmptyGroups") {
+      const batchId=Number(payload.batchId);
+      if(!batchId)return Response.json({error:"اختر الباتش أولًا"},{status:400});
+      const empty=await db.prepare("SELECT id FROM settings_entities WHERE kind='group' AND CAST(json_extract(custom_data,'$.batchId') AS INTEGER)=? AND NOT EXISTS (SELECT 1 FROM group_members WHERE group_members.group_id=settings_entities.id)").bind(batchId).all<{id:number}>();
+      if(empty.results.length) await db.batch(empty.results.flatMap((group)=>[db.prepare("DELETE FROM group_members WHERE group_id=?").bind(group.id),db.prepare("DELETE FROM settings_entities WHERE id=?").bind(group.id)]));
+      return Response.json({deleted:empty.results.length});
+    }
+
+    if(action==="updateGroupZoom") {
+      const id=Number(payload.id), zoomUrl=String(payload.zoomUrl??"").trim();
+      if(!id)return Response.json({error:"الجروب غير محدد"},{status:400});
+      if(zoomUrl){try{const url=new URL(zoomUrl);if(!/^https?:$/.test(url.protocol))throw new Error()}catch{return Response.json({error:"أدخل رابط Zoom صحيح يبدأ بـ https://"},{status:400})}}
+      const group=await db.prepare("SELECT custom_data AS customData FROM settings_entities WHERE id=? AND kind='group'").bind(id).first<{customData:string}>();
+      if(!group)return Response.json({error:"الجروب غير موجود"},{status:404});
+      const details=JSON.parse(group.customData||"{}") as Record<string,unknown>; details.zoomUrl=zoomUrl;
+      await db.prepare("UPDATE settings_entities SET custom_data=? WHERE id=?").bind(JSON.stringify(details),id).run();
+      return Response.json({ok:true});
+    }
+
     if (action === "createSettingsEntity" || action === "updateSettingsEntity") {
       const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card","exam"]);
       const kind=String(payload.kind??"");
