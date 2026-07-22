@@ -64,6 +64,13 @@
       "when": 1784729632763,
       "tag": "0008_colossal_wallow",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1784730716856,
+      "tag": "0009_cool_chat",
+      "breakpoints": true
     }
   ]
 }

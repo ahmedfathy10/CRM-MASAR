@@ -74,6 +74,15 @@ export const timeSlots = sqliteTable("time_slots", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const settingsEntities = sqliteTable("settings_entities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const employees = sqliteTable("employees", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fullName: text("full_name").notNull(),

@@ -7,7 +7,7 @@ export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
-    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, forms] = await Promise.all([
+    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, settingsEntities, forms] = await Promise.all([
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
@@ -16,9 +16,10 @@ export async function GET() {
       db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
       db.prepare(`SELECT id, title, is_active AS isActive, custom_data AS customData FROM tracks ORDER BY title`).all(),
       db.prepare(`SELECT id, title, start_time AS startTime, end_time AS endTime, is_active AS isActive, custom_data AS customData FROM time_slots ORDER BY start_time`).all(),
-      db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('employee','branch','classroom','track','time_slot') ORDER BY f.form_key, ff.sort_order`).all(),
+      db.prepare(`SELECT id, kind, title, is_active AS isActive, custom_data AS customData FROM settings_entities ORDER BY kind, title`).all(),
+      db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
-    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot") });
+    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, settingsEntities: settingsEntities.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot"), catalogFields: Object.fromEntries(["round","study_type","level","education_batch","group","setup_card"].map((key)=>[key,forms.results.filter((field)=>field.formKey===key)])) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "تعذر تحميل البيانات" }, { status: 500 });
   }
@@ -139,6 +140,11 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "createSettingsEntity" || action === "updateSettingsEntity") {
+      const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card"]);const kind=String(payload.kind??"");const title=String(payload.title??"").trim();if(!allowedKinds.has(kind)||!title)return Response.json({error:"نوع الإعداد والاسم مطلوبان"},{status:400});const id=action==="updateSettingsEntity"?Number(payload.id):0;const duplicate=await db.prepare("SELECT id FROM settings_entities WHERE kind=? AND LOWER(title)=LOWER(?) AND id<>?").bind(kind,title,id).first();if(duplicate)return Response.json({error:"يوجد عنصر بنفس الاسم بالفعل"},{status:409});const raw=payload.isActive;const active=raw===false||raw===0||raw==="0"||raw==="غير نشط"||raw==="inactive"?0:1;const customData=JSON.stringify(payload.customData??{});if(action==="updateSettingsEntity"){await db.prepare("UPDATE settings_entities SET title=?,is_active=?,custom_data=? WHERE id=? AND kind=?").bind(title,active,customData,id,kind).run();return Response.json({ok:true})}const result=await db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) VALUES (?,?,?,?)").bind(kind,title,active,customData).run();return Response.json({id:result.meta.last_row_id},{status:201});
+    }
+    if(action==="deleteSettingsEntity"){const id=Number(payload.id);const usage=await db.prepare("SELECT COUNT(*) AS count FROM settings_entities WHERE id<>? AND (json_extract(custom_data,'$.levelId')=? OR json_extract(custom_data,'$.studyTypeId')=? OR json_extract(custom_data,'$.batchId')=?)").bind(id,id,id,id).first<{count:number}>();if((usage?.count??0)>0)return Response.json({error:"لا يمكن حذف عنصر مرتبط بإعداد آخر. يمكنك تعطيله."},{status:409});await db.prepare("DELETE FROM settings_entities WHERE id=?").bind(id).run();return Response.json({ok:true})}
+
     if (action === "createDepartment") {
       const name = String(payload.name ?? "").trim();
       if (!name) return Response.json({ error: "اسم القسم مطلوب" }, { status: 400 });
@@ -184,7 +190,7 @@ export async function POST(request: Request) {
       const label = String(payload.label ?? "").trim();
       if (!label) return Response.json({ error: "اسم الحقل مطلوب" }, { status: 400 });
       const requestedForm = String(payload.formKey ?? "employee");
-      const allowedForms = new Set(["employee", "branch", "classroom", "track", "time_slot", "lead", "call", "lead_details", "followup"]);
+      const allowedForms = new Set(["employee", "branch", "classroom", "track", "time_slot", "round", "study_type", "level", "education_batch", "group", "setup_card", "lead", "call", "lead_details", "followup"]);
       if (!allowedForms.has(requestedForm)) return Response.json({ error: "النموذج المطلوب غير مدعوم" }, { status: 400 });
       const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key=?").bind(requestedForm).first<{ id: number }>();
       if (!form) throw new Error("تعريف النموذج غير موجود");

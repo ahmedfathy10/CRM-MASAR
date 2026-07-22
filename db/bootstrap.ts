@@ -11,6 +11,8 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS classrooms (id INTEGER PRIMARY KEY AUTOINCREMENT, branch_id INTEGER NOT NULL REFERENCES branches(id), name TEXT NOT NULL, capacity INTEGER NOT NULL DEFAULT 1, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS time_slots (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS settings_entities (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, title TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE INDEX IF NOT EXISTS settings_entities_kind_idx ON settings_entities (kind, title)`,
   `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_definitions (id INTEGER PRIMARY KEY AUTOINCREMENT, form_key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS form_fields (id INTEGER PRIMARY KEY AUTOINCREMENT, form_id INTEGER NOT NULL REFERENCES form_definitions(id), field_key TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL, placeholder TEXT NOT NULL DEFAULT '', required INTEGER NOT NULL DEFAULT 0, visible INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0, options_json TEXT NOT NULL DEFAULT '[]', width TEXT NOT NULL DEFAULT 'half')`,
@@ -70,6 +72,15 @@ const timeSlotFields: FieldSeed[] = [
   ["startTime", "وقت البداية", "time", "", 1, 1, 2, "half", "[]"],
   ["endTime", "وقت النهاية", "time", "", 1, 1, 3, "half", "[]"],
   ["isActive", "الحالة", "select", "اختر الحالة", 1, 1, 4, "full", '["نشط","غير نشط"]'],
+];
+
+const catalogForms:{key:string;name:string;description:string;fields:FieldSeed[]}[] = [
+  {key:"round",name:"الجولة",description:"بيانات Rounds",fields:[["title","اسم الجولة","text","مثال: Round 1",1,1,1,"full","[]"],["duration","المدة بالدقائق","number","مدة الجولة",1,1,2,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,3,"half",'["نشط","غير نشط"]']]},
+  {key:"study_type",name:"نوع الدراسة",description:"بيانات Study Types",fields:[["title","نوع الدراسة","text","مثال: حضوري",1,1,1,"full","[]"],["isActive","الحالة","select","اختر الحالة",1,1,2,"full",'["نشط","غير نشط"]']]},
+  {key:"level",name:"المستوى",description:"بيانات Levels",fields:[["title","اسم المستوى","text","مثال: Level 1",1,1,1,"full","[]"],["trackId","الـTrack","select","اختر الـTrack",1,1,2,"half","[]"],["sortOrder","الترتيب","number","1",1,1,3,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,4,"full",'["نشط","غير نشط"]']]},
+  {key:"education_batch",name:"الدفعة التعليمية",description:"بيانات Education Batches",fields:[["title","اسم الدفعة","text","مثال: English July",1,1,1,"full","[]"],["branchId","الفرع","select","اختر الفرع",1,1,2,"half","[]"],["trackId","الـTrack","select","اختر الـTrack",1,1,3,"half","[]"],["levelId","المستوى","select","اختر المستوى",1,1,4,"half","[]"],["studyTypeId","نوع الدراسة","select","اختر النوع",1,1,5,"half","[]"],["timeSlotId","الفترة الزمنية","select","اختر الفترة",0,1,6,"half","[]"],["startDate","تاريخ البداية","date","",1,1,7,"half","[]"],["endDate","تاريخ النهاية","date","",1,1,8,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,9,"full",'["نشط","غير نشط"]']]},
+  {key:"group",name:"المجموعة",description:"بيانات Groups",fields:[["title","اسم المجموعة","text","مثال: Group A",1,1,1,"full","[]"],["batchId","الدفعة","select","اختر الدفعة",1,1,2,"half","[]"],["classroomId","القاعة","select","اختر القاعة",1,1,3,"half","[]"],["capacity","السعة","number","عدد الطلاب",1,1,4,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,5,"half",'["نشط","غير نشط"]']]},
+  {key:"setup_card",name:"كارت الإعداد",description:"بيانات Setup Cards",fields:[["title","اسم الكارت","text","مثال: New Student",1,1,1,"full","[]"],["color","اللون","text","#2f6b5f",0,1,2,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,3,"half",'["نشط","غير نشط"]']]},
 ];
 
 export async function ensureDatabase() {
@@ -139,6 +150,7 @@ async function initialize() {
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('classroom', 'بيانات القاعة', 'الحقول المستخدمة عند إضافة أو تعديل قاعة')").run();
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('track', 'بيانات الـTrack', 'الحقول المستخدمة عند إضافة أو تعديل Track')").run();
   await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('time_slot', 'بيانات الفترة الزمنية', 'الحقول المستخدمة عند إضافة أو تعديل فترة زمنية')").run();
+  for (const formSeed of catalogForms) await db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES (?, ?, ?)").bind(formSeed.key,formSeed.name,formSeed.description).run();
   const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'employee'").first<{ id: number }>();
   if (!form) return;
   await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key='branch'").bind(form.id).run();
@@ -152,4 +164,5 @@ async function initialize() {
   if (trackForm) await db.batch(trackFields.map((field) => db.prepare(query).bind(trackForm.id, ...field)));
   const timeSlotForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key = 'time_slot'").first<{ id: number }>();
   if (timeSlotForm) await db.batch(timeSlotFields.map((field) => db.prepare(query).bind(timeSlotForm.id, ...field)));
+  for (const formSeed of catalogForms) { const definition=await db.prepare("SELECT id FROM form_definitions WHERE form_key=?").bind(formSeed.key).first<{id:number}>(); if(definition) await db.batch(formSeed.fields.map((field)=>db.prepare(query).bind(definition.id,...field))); }
 }
