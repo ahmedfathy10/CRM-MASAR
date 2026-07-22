@@ -9,7 +9,7 @@ export async function GET() {
     const db = env.DB;
     const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, settingsEntities, forms, students, groupMembers] = await Promise.all([
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
-      db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
+      db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, j.reports_to_id AS reportsToId, d.name AS department, manager.name AS reportsToName FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id LEFT JOIN job_titles manager ON manager.id=j.reports_to_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
       db.prepare(`SELECT e.id, e.hr_id AS hrId, e.full_name AS fullName, e.email, e.phone, e.status, e.custom_data AS customData, e.department_id AS departmentId, e.job_title_id AS jobTitleId, e.role_id AS roleId, e.branch_id AS branchId, d.name AS department, j.name AS jobTitle, r.name AS role, b.name AS branchName FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN roles r ON r.id=e.role_id LEFT JOIN branches b ON b.id=e.branch_id ORDER BY e.id DESC`).all(),
       db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
@@ -46,6 +46,29 @@ export async function POST(request: Request) {
       const prefix=(department?.name||"HR").replace(/\s+/g,"").slice(0,3).toUpperCase()||"HR"; const hrId=`${prefix}-${String(id).padStart(4,"0")}`;
       await db.prepare("UPDATE employees SET hr_id=? WHERE id=?").bind(hrId,id).run();
       return Response.json({ id,hrId }, { status: 201 });
+    }
+
+    if (action === "updateEmployee") {
+      const id=Number(payload.id), fullName=String(payload.fullName??"").trim(), email=String(payload.email??"").trim().toLowerCase();
+      if(!id||!fullName||!email)return Response.json({error:"الاسم والبريد الإلكتروني مطلوبان"},{status:400});
+      const duplicate=await db.prepare("SELECT id FROM employees WHERE LOWER(email)=LOWER(?) AND id<>?").bind(email,id).first();
+      if(duplicate)return Response.json({error:"البريد الإلكتروني مستخدم لموظف آخر"},{status:409});
+      await db.prepare("UPDATE employees SET full_name=?,email=?,phone=?,department_id=?,job_title_id=?,branch_id=?,status=?,custom_data=? WHERE id=?").bind(fullName,email,String(payload.phone??""),Number(payload.departmentId)||null,Number(payload.jobTitleId)||null,Number(payload.branchId)||null,String(payload.status??"نشط"),JSON.stringify(payload.customData??{}),id).run();
+      return Response.json({ok:true});
+    }
+
+    if (action === "deactivateEmployee") {
+      const id=Number(payload.id); if(!id)return Response.json({error:"الموظف غير محدد"},{status:400});
+      await db.prepare("UPDATE employees SET status='موقوف' WHERE id=?").bind(id).run();
+      return Response.json({ok:true});
+    }
+
+    if (action === "deleteEmployee") {
+      const id=Number(payload.id);
+      const usage=await db.prepare("SELECT (SELECT COUNT(*) FROM leads WHERE assigned_employee_id=?) + (SELECT COUNT(*) FROM call_records WHERE assigned_employee_id=?) + (SELECT COUNT(*) FROM followups WHERE assigned_employee_id=?) AS count").bind(id,id,id).first<{count:number}>();
+      if((usage?.count??0)>0)return Response.json({error:"لا يمكن حذف موظف مرتبط بعملاء أو مكالمات أو متابعات. استخدم إيقاف الحساب بدلًا من ذلك."},{status:409});
+      await db.prepare("DELETE FROM employees WHERE id=?").bind(id).run();
+      return Response.json({ok:true});
     }
 
     if (action === "createBranch" || action === "updateBranch") {
@@ -150,7 +173,7 @@ export async function POST(request: Request) {
       const id=Number(payload.id), role=String(payload.role), employeeId=Number(payload.employeeId);
       if(!id||!["teacher","admin"].includes(role)||!employeeId) return Response.json({error:"بيانات الموظف غير مكتملة"},{status:400});
       const group=await db.prepare("SELECT custom_data AS customData FROM settings_entities WHERE id=? AND kind='group'").bind(id).first<{customData:string}>();
-      const employee=await db.prepare("SELECT id FROM employees WHERE id=? AND status='active'").bind(employeeId).first();
+      const employee=await db.prepare("SELECT id FROM employees WHERE id=? AND status IN ('active','نشط')").bind(employeeId).first();
       if(!group||!employee) return Response.json({error:"الجروب أو الموظف غير موجود"},{status:404});
       const details=JSON.parse(group.customData||"{}") as Record<string,unknown>; details[`${role}Id`]=employeeId;
       await db.prepare("UPDATE settings_entities SET custom_data=? WHERE id=?").bind(JSON.stringify(details),id).run();
@@ -236,7 +259,9 @@ export async function POST(request: Request) {
       const name = String(payload.name ?? "").trim();
       const departmentId = Number(payload.departmentId);
       if (!name || !departmentId) return Response.json({ error: "اسم الوظيفة والقسم مطلوبان" }, { status: 400 });
-      const result = await db.prepare("INSERT INTO job_titles (name, department_id) VALUES (?, ?)").bind(name, departmentId).run();
+      const reportsToId = Number(payload.reportsToId) || null;
+      if (reportsToId && !await db.prepare("SELECT id FROM job_titles WHERE id=?").bind(reportsToId).first()) return Response.json({ error: "الدور الإداري المحدد غير موجود" }, { status: 400 });
+      const result = await db.prepare("INSERT INTO job_titles (name, department_id, reports_to_id) VALUES (?, ?, ?)").bind(name, departmentId, reportsToId).run();
       return Response.json({ id: result.meta.last_row_id }, { status: 201 });
     }
 
@@ -245,9 +270,12 @@ export async function POST(request: Request) {
       const name = String(payload.name ?? "").trim();
       const departmentId = Number(payload.departmentId);
       if (!id || !name || !departmentId) return Response.json({ error: "اسم الوظيفة والقسم مطلوبان" }, { status: 400 });
+      const reportsToId = Number(payload.reportsToId) || null;
+      if (reportsToId === id) return Response.json({ error: "لا يمكن أن يرفع الدور تقاريره إلى نفسه" }, { status: 400 });
+      if (reportsToId && !await db.prepare("SELECT id FROM job_titles WHERE id=?").bind(reportsToId).first()) return Response.json({ error: "الدور الإداري المحدد غير موجود" }, { status: 400 });
       const duplicate = await db.prepare("SELECT id FROM job_titles WHERE department_id=? AND LOWER(name)=LOWER(?) AND id<>?").bind(departmentId, name, id).first();
       if (duplicate) return Response.json({ error: "توجد وظيفة بنفس الاسم داخل هذا القسم" }, { status: 409 });
-      await db.prepare("UPDATE job_titles SET name=?, department_id=? WHERE id=?").bind(name, departmentId, id).run();
+      await db.prepare("UPDATE job_titles SET name=?, department_id=?, reports_to_id=? WHERE id=?").bind(name, departmentId, reportsToId, id).run();
       return Response.json({ ok: true });
     }
 
@@ -261,7 +289,7 @@ export async function POST(request: Request) {
 
     if (action === "deleteJobTitle") {
       const id = Number(payload.id);
-      const usage = await db.prepare("SELECT COUNT(*) AS count FROM employees WHERE job_title_id=?").bind(id).first<{ count: number }>();
+      const usage = await db.prepare("SELECT (SELECT COUNT(*) FROM employees WHERE job_title_id=?) + (SELECT COUNT(*) FROM job_titles WHERE reports_to_id=?) AS count").bind(id, id).first<{ count: number }>();
       if ((usage?.count ?? 0) > 0) return Response.json({ error: "لا يمكن حذف وظيفة مرتبطة بموظفين" }, { status: 409 });
       await db.prepare("DELETE FROM job_titles WHERE id=?").bind(id).run();
       return Response.json({ ok: true });

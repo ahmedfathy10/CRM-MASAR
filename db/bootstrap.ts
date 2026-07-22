@@ -4,7 +4,7 @@ let ready: Promise<void> | null = null;
 
 const statements = [
   `CREATE TABLE IF NOT EXISTS departments (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '#2f6b5f', parent_id INTEGER REFERENCES departments(id), support_enabled INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-  `CREATE TABLE IF NOT EXISTS job_titles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, department_id INTEGER REFERENCES departments(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE TABLE IF NOT EXISTS job_titles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, department_id INTEGER REFERENCES departments(id), reports_to_id INTEGER REFERENCES job_titles(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL REFERENCES roles(id), resource TEXT NOT NULL, action TEXT NOT NULL, allowed INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS branches (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, address TEXT NOT NULL DEFAULT '', primary_phone TEXT NOT NULL DEFAULT '', secondary_phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', social_url TEXT NOT NULL DEFAULT '', is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
@@ -102,6 +102,9 @@ async function initialize() {
   const columnNames = new Set(departmentColumns.results.map((column) => column.name));
   if (!columnNames.has("parent_id")) await db.prepare("ALTER TABLE departments ADD COLUMN parent_id INTEGER REFERENCES departments(id)").run();
   if (!columnNames.has("support_enabled")) await db.prepare("ALTER TABLE departments ADD COLUMN support_enabled INTEGER NOT NULL DEFAULT 0").run();
+  const jobTitleColumns = await db.prepare("PRAGMA table_info(job_titles)").all<{ name: string }>();
+  if (!jobTitleColumns.results.some((column) => column.name === "reports_to_id")) await db.prepare("ALTER TABLE job_titles ADD COLUMN reports_to_id INTEGER REFERENCES job_titles(id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS job_titles_reports_to_idx ON job_titles (reports_to_id)").run();
   const employeeColumns = await db.prepare("PRAGMA table_info(employees)").all<{ name: string }>();
   if (!employeeColumns.results.some((column) => column.name === "branch_id")) await db.prepare("ALTER TABLE employees ADD COLUMN branch_id INTEGER REFERENCES branches(id)").run();
   if (!employeeColumns.results.some((column) => column.name === "hr_id")) await db.prepare("ALTER TABLE employees ADD COLUMN hr_id TEXT NOT NULL DEFAULT ''").run();

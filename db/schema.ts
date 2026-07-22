@@ -15,6 +15,7 @@ export const jobTitles = sqliteTable("job_titles", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   departmentId: integer("department_id").references(() => departments.id),
+  reportsToId: integer("reports_to_id"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
