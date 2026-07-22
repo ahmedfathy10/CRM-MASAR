@@ -75,6 +75,7 @@ const timeSlotFields: FieldSeed[] = [
 ];
 
 const catalogForms:{key:string;name:string;description:string;fields:FieldSeed[]}[] = [
+  {key:"exam",name:"الامتحان",description:"بيانات Exams",fields:[["title","اسم الامتحان","text","مثال: English Level 1 Final",1,1,1,"full","[]"],["trackId","الـTrack","select","اختر الـTrack",1,1,2,"half","[]"],["levelId","المستوى","select","اختر المستوى",1,1,3,"half","[]"],["duration","المدة بالدقائق","number","60",1,1,4,"half","[]"],["totalGrade","الدرجة النهائية","number","100",1,1,5,"half","[]"],["passGrade","درجة النجاح","number","50",1,1,6,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,7,"half",'["نشط","غير نشط"]']]},
   {key:"round",name:"الجولة",description:"بيانات Rounds",fields:[["title","اسم الجولة","text","مثال: Round 1",1,1,1,"full","[]"],["duration","المدة بالدقائق","number","مدة الجولة",1,1,2,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,3,"half",'["نشط","غير نشط"]']]},
   {key:"study_type",name:"نوع الدراسة",description:"بيانات Study Types",fields:[["title","نوع الدراسة","text","مثال: حضوري",1,1,1,"full","[]"],["isActive","الحالة","select","اختر الحالة",1,1,2,"full",'["نشط","غير نشط"]']]},
   {key:"level",name:"المستوى",description:"بيانات Levels",fields:[["title","اسم المستوى","text","مثال: Level 1",1,1,1,"full","[]"],["trackId","الـTrack","select","اختر الـTrack",1,1,2,"half","[]"],["sortOrder","الترتيب","number","1",1,1,3,"half","[]"],["isActive","الحالة","select","اختر الحالة",1,1,4,"full",'["نشط","غير نشط"]']]},
