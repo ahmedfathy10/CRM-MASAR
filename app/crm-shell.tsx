@@ -310,6 +310,7 @@ function EmployeeDialog({ data, onClose, onSubmit }: { data: Setup; onClose: () 
 
 function DynamicField({ field, value, setValue, data, values, disabled=false }: { field: Field; value: unknown; setValue:(v:unknown)=>void; data:Setup; values:Record<string,unknown>; disabled?:boolean }) {
   let options:{id:string|number;name:string}[]=parseOptions(field).map((name)=>({id:name,name}));
+  const selectedBatch=data.settingsEntities.find((item)=>item.kind==="education_batch"&&item.id===Number(values.batchId));let batchData:Record<string,unknown>={};try{batchData=selectedBatch?JSON.parse(selectedBatch.customData||"{}"):{};}catch{batchData={}}const selectedTrackId=Number(values.trackId||batchData.trackId)||0;
   if(field.fieldKey==="departmentId") options=data.departments.map((d)=>({id:d.id,name:d.name}));
   if(field.fieldKey==="jobTitleId") options=data.jobTitles.filter((j)=>!values.departmentId||j.departmentId===Number(values.departmentId)).map((j)=>({id:j.id,name:j.name}));
   if(field.fieldKey==="roleId") options=data.roles.map((r)=>({id:r.id,name:r.name}));
@@ -317,9 +318,9 @@ function DynamicField({ field, value, setValue, data, values, disabled=false }: 
   if(field.fieldKey==="branchId") options=data.branches.filter((branch)=>branch.isActive||Number(value)===branch.id).map((branch)=>({id:branch.id,name:branch.name}));
   if(field.fieldKey==="interest") options=data.tracks.filter((track)=>track.isActive||String(value)===track.title).map((track)=>({id:track.title,name:track.title}));
   if(field.fieldKey==="trackId") options=data.tracks.filter((item)=>item.isActive||Number(value)===item.id).map((item)=>({id:item.id,name:item.title}));
-  if(field.fieldKey==="timeSlotId") options=data.timeSlots.filter((item)=>item.isActive||Number(value)===item.id).map((item)=>({id:item.id,name:item.title}));
-  if(field.fieldKey==="classroomId") options=data.classrooms.filter((item)=>item.isActive||Number(value)===item.id).map((item)=>({id:item.id,name:`${item.name} — ${item.branchName}`}));
-  if(field.fieldKey==="levelId") options=data.settingsEntities.filter((item)=>item.kind==="level"&&(item.isActive||Number(value)===item.id)).map((item)=>({id:item.id,name:item.title}));
+  if(field.fieldKey==="timeSlotId") options=data.timeSlots.filter((item)=>(!selectedTrackId||item.trackId===selectedTrackId)&&(item.isActive||Number(value)===item.id)).map((item)=>({id:item.id,name:item.title}));
+  if(field.fieldKey==="classroomId") options=data.classrooms.filter((item)=>(!values.branchId||item.branchId===Number(values.branchId))&&(item.isActive||Number(value)===item.id)).map((item)=>({id:item.id,name:`${item.name} — ${item.branchName}`}));
+  if(field.fieldKey==="levelId") options=data.settingsEntities.filter((item)=>{let detail:Record<string,unknown>={};try{detail=JSON.parse(item.customData||"{}")}catch{}return item.kind==="level"&&(!selectedTrackId||Number(detail.trackId)===selectedTrackId)&&(item.isActive||Number(value)===item.id)}).map((item)=>({id:item.id,name:item.title}));
   if(field.fieldKey==="studyTypeId") options=data.settingsEntities.filter((item)=>item.kind==="study_type"&&(item.isActive||Number(value)===item.id)).map((item)=>({id:item.id,name:item.title}));
   if(field.fieldKey==="batchId") options=data.settingsEntities.filter((item)=>item.kind==="education_batch"&&(item.isActive||Number(value)===item.id)).map((item)=>({id:item.id,name:item.title}));
   const common={disabled,required:!!field.required};
