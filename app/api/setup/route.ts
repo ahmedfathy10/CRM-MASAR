@@ -16,7 +16,7 @@ export async function GET() {
       db.prepare(`SELECT c.id, c.branch_id AS branchId, b.name AS branchName, c.name, c.capacity, c.is_active AS isActive, c.custom_data AS customData FROM classrooms c JOIN branches b ON b.id=c.branch_id ORDER BY b.name, c.name`).all(),
       db.prepare(`SELECT id, title, is_active AS isActive, custom_data AS customData FROM tracks ORDER BY title`).all(),
       db.prepare(`SELECT ts.id, ts.track_id AS trackId, t.title AS trackName, ts.title, ts.start_time AS startTime, ts.end_time AS endTime, ts.is_active AS isActive, ts.custom_data AS customData FROM time_slots ts LEFT JOIN tracks t ON t.id=ts.track_id ORDER BY t.title, ts.start_time`).all(),
-      db.prepare(`SELECT id, kind, title, is_active AS isActive, custom_data AS customData FROM settings_entities ORDER BY kind, title`).all(),
+      db.prepare(`SELECT se.id, se.kind, se.title, se.is_active AS isActive, se.custom_data AS customData, CASE WHEN se.kind='group' THEN (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=se.id) ELSE 0 END AS studentCount FROM settings_entities se ORDER BY se.kind, se.title`).all(),
       db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
     return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, settingsEntities: settingsEntities.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot"), catalogFields: Object.fromEntries(["round","study_type","level","education_batch","group","setup_card","exam"].map((key)=>[key,forms.results.filter((field)=>field.formKey===key)])) });
@@ -142,9 +142,46 @@ export async function POST(request: Request) {
     }
 
     if (action === "createSettingsEntity" || action === "updateSettingsEntity") {
-      const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card","exam"]);const kind=String(payload.kind??"");const title=String(payload.title??"").trim();if(!allowedKinds.has(kind)||!title)return Response.json({error:"نوع الإعداد والاسم مطلوبان"},{status:400});const id=action==="updateSettingsEntity"?Number(payload.id):0;const duplicate=await db.prepare("SELECT id FROM settings_entities WHERE kind=? AND LOWER(title)=LOWER(?) AND id<>?").bind(kind,title,id).first();if(duplicate)return Response.json({error:"يوجد عنصر بنفس الاسم بالفعل"},{status:409});const raw=payload.isActive;const active=raw===false||raw===0||raw==="0"||raw==="غير نشط"||raw==="inactive"?0:1;const customData=JSON.stringify(payload.customData??{});if(action==="updateSettingsEntity"){await db.prepare("UPDATE settings_entities SET title=?,is_active=?,custom_data=? WHERE id=? AND kind=?").bind(title,active,customData,id,kind).run();return Response.json({ok:true})}const result=await db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) VALUES (?,?,?,?)").bind(kind,title,active,customData).run();return Response.json({id:result.meta.last_row_id},{status:201});
+      const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card","exam"]);
+      const kind=String(payload.kind??"");
+      if(!allowedKinds.has(kind)) return Response.json({error:"نوع الإعداد غير مدعوم"},{status:400});
+      const details=(payload.customData??{}) as Record<string,unknown>;
+      const id=action==="updateSettingsEntity"?Number(payload.id):0;
+      if(kind==="group") {
+        const batchId=Number(details.batchId), levelId=Number(details.levelId), roundId=Number(details.roundId);
+        const startDate=String(details.startDate??"").trim();
+        if(!batchId||!levelId||!roundId||!startDate) return Response.json({error:"الدفعة والروند والمستوى وتاريخ بداية الجروب مطلوبة"},{status:400});
+        if(action==="updateSettingsEntity") { await db.prepare("UPDATE settings_entities SET custom_data=? WHERE id=? AND kind='group'").bind(JSON.stringify(details),id).run(); return Response.json({ok:true}); }
+        const batch=await db.prepare("SELECT id, custom_data AS customData FROM settings_entities WHERE id=? AND kind='education_batch'").bind(batchId).first<{id:number;customData:string}>();
+        const level=await db.prepare("SELECT id, custom_data AS customData FROM settings_entities WHERE id=? AND kind='level'").bind(levelId).first<{id:number;customData:string}>();
+        if(!batch||!level) return Response.json({error:"الدفعة أو المستوى غير موجود"},{status:404});
+        const batchDetails=JSON.parse(batch.customData||"{}") as Record<string,unknown>;
+        const levelDetails=JSON.parse(level.customData||"{}") as Record<string,unknown>;
+        const trackId=Number(batchDetails.trackId);
+        if(!trackId||Number(levelDetails.trackId)!==trackId) return Response.json({error:"المستوى يجب أن يكون تابعًا لنفس Track الخاص بالدفعة"},{status:400});
+        const levels=await db.prepare("SELECT id, custom_data AS customData FROM settings_entities WHERE kind='level' AND CAST(json_extract(custom_data,'$.trackId') AS INTEGER)=? ORDER BY CAST(json_extract(custom_data,'$.sortOrder') AS INTEGER), id").bind(trackId).all<{id:number;customData:string}>();
+        const batches=await db.prepare("SELECT id, custom_data AS customData FROM settings_entities WHERE kind='education_batch' AND CAST(json_extract(custom_data,'$.trackId') AS INTEGER)=? ORDER BY json_extract(custom_data,'$.startDate'), id").bind(trackId).all<{id:number;customData:string}>();
+        const levelIndex=levels.results.findIndex((item)=>Number(item.id)===levelId), batchIndex=batches.results.findIndex((item)=>Number(item.id)===batchId);
+        if(levelIndex<0||batchIndex<0) return Response.json({error:"تعذر تحديد ترتيب التصعيد"},{status:400});
+        let rootId=0, previousId=0, created=0;
+        const steps=Math.min(levels.results.length-levelIndex,batches.results.length-batchIndex);
+        for(let step=0;step<steps;step++) {
+          const targetLevel=levels.results[levelIndex+step], targetBatch=batches.results[batchIndex+step];
+          const exists=await db.prepare("SELECT id FROM settings_entities WHERE kind='group' AND json_extract(custom_data,'$.batchId')=? AND json_extract(custom_data,'$.levelId')=?").bind(targetBatch.id,targetLevel.id).first<{id:number}>();
+          if(exists){previousId=exists.id;if(!rootId)rootId=exists.id;continue;}
+          const targetBatchDetails=JSON.parse(targetBatch.customData||"{}") as Record<string,unknown>;
+          const nextDetails:Record<string,unknown>={...details,batchId:targetBatch.id,levelId:targetLevel.id,startDate:step===0?startDate:String(targetBatchDetails.startDate??startDate),progressionRootId:rootId||undefined,previousGroupId:previousId||undefined,sequenceIndex:step};
+          const inserted=await db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) VALUES ('group',?,1,?)").bind(`PENDING-${Date.now()}-${step}`,JSON.stringify(nextDetails)).run();
+          const newId=Number(inserted.meta.last_row_id), groupId=`GRP-${String(newId).padStart(6,"0")}`;
+          if(!rootId)rootId=newId; nextDetails.progressionRootId=rootId;
+          await db.prepare("UPDATE settings_entities SET title=?,custom_data=? WHERE id=?").bind(groupId,JSON.stringify(nextDetails),newId).run();
+          previousId=newId;created++;
+        }
+        return Response.json({id:rootId,created},{status:201});
+      }
+      const title=String(payload.title??"").trim();if(!title)return Response.json({error:"اسم الإعداد مطلوب"},{status:400});const duplicate=await db.prepare("SELECT id FROM settings_entities WHERE kind=? AND LOWER(title)=LOWER(?) AND id<>?").bind(kind,title,id).first();if(duplicate)return Response.json({error:"يوجد عنصر بنفس الاسم بالفعل"},{status:409});const raw=payload.isActive;const active=raw===false||raw===0||raw==="0"||raw==="غير نشط"||raw==="inactive"?0:1;const customData=JSON.stringify(details);if(action==="updateSettingsEntity"){await db.prepare("UPDATE settings_entities SET title=?,is_active=?,custom_data=? WHERE id=? AND kind=?").bind(title,active,customData,id,kind).run();return Response.json({ok:true})}const result=await db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) VALUES (?,?,?,?)").bind(kind,title,active,customData).run();return Response.json({id:result.meta.last_row_id},{status:201});
     }
-    if(action==="deleteSettingsEntity"){const id=Number(payload.id);const usage=await db.prepare("SELECT COUNT(*) AS count FROM settings_entities WHERE id<>? AND (json_extract(custom_data,'$.levelId')=? OR json_extract(custom_data,'$.studyTypeId')=? OR json_extract(custom_data,'$.batchId')=?)").bind(id,id,id,id).first<{count:number}>();if((usage?.count??0)>0)return Response.json({error:"لا يمكن حذف عنصر مرتبط بإعداد آخر. يمكنك تعطيله."},{status:409});await db.prepare("DELETE FROM settings_entities WHERE id=?").bind(id).run();return Response.json({ok:true})}
+    if(action==="deleteSettingsEntity"){const id=Number(payload.id);const usage=await db.prepare("SELECT COUNT(*) AS count FROM settings_entities WHERE id<>? AND (json_extract(custom_data,'$.levelId')=? OR json_extract(custom_data,'$.studyTypeId')=? OR json_extract(custom_data,'$.batchId')=? OR json_extract(custom_data,'$.roundId')=?)").bind(id,id,id,id,id).first<{count:number}>();if((usage?.count??0)>0)return Response.json({error:"لا يمكن حذف عنصر مرتبط بإعداد آخر."},{status:409});await db.prepare("DELETE FROM group_members WHERE group_id=?").bind(id).run();await db.prepare("DELETE FROM settings_entities WHERE id=?").bind(id).run();return Response.json({ok:true})}
 
     if (action === "createDepartment") {
       const name = String(payload.name ?? "").trim();
