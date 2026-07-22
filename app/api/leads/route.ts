@@ -7,12 +7,13 @@ export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
-    const [leads, calls, forms] = await Promise.all([
+    const [leads, calls, followups, forms] = await Promise.all([
       db.prepare(`SELECT l.id, l.full_name AS fullName, l.primary_phone AS primaryPhone, l.secondary_phone AS secondaryPhone, l.email, l.source, l.campaign, l.interest, l.status, l.priority, l.notes, l.custom_data AS customData, l.assigned_employee_id AS assignedEmployeeId, l.branch_id AS branchId, l.created_at AS createdAt, e.full_name AS assignedEmployee, b.name AS branchName, (SELECT COUNT(*) FROM call_records c WHERE c.lead_id=l.id) AS callCount, (SELECT c.result FROM call_records c WHERE c.lead_id=l.id ORDER BY c.call_at DESC, c.id DESC LIMIT 1) AS lastCallResult, (SELECT ce.full_name FROM call_records c LEFT JOIN employees ce ON ce.id=c.assigned_employee_id WHERE c.lead_id=l.id ORDER BY c.call_at DESC, c.id DESC LIMIT 1) AS lastCallBy FROM leads l LEFT JOIN employees e ON e.id=l.assigned_employee_id LEFT JOIN branches b ON b.id=l.branch_id ORDER BY l.id DESC LIMIT 200`).all(),
       db.prepare(`SELECT c.id, c.lead_id AS leadId, c.phone, c.direction, c.result, c.assigned_employee_id AS assignedEmployeeId, c.branch_id AS branchId, c.call_at AS callAt, c.notes, e.full_name AS assignedEmployee, l.full_name AS leadName, b.name AS branchName FROM call_records c LEFT JOIN employees e ON e.id=c.assigned_employee_id LEFT JOIN leads l ON l.id=c.lead_id LEFT JOIN branches b ON b.id=c.branch_id ORDER BY c.call_at DESC, c.id DESC LIMIT 200`).all(),
-      db.prepare(`SELECT f.form_key AS formKey, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('lead','call','lead_details') ORDER BY f.form_key, ff.sort_order`).all(),
+      db.prepare(`SELECT f.id, f.lead_id AS leadId, f.assigned_employee_id AS assignedEmployeeId, f.branch_id AS branchId, f.scheduled_at AS scheduledAt, f.channel, f.status, f.priority, f.notes, f.outcome, f.custom_data AS customData, f.completed_at AS completedAt, f.created_at AS createdAt, l.full_name AS leadName, l.primary_phone AS leadPhone, e.full_name AS assignedEmployee, b.name AS branchName FROM followups f JOIN leads l ON l.id=f.lead_id LEFT JOIN employees e ON e.id=f.assigned_employee_id LEFT JOIN branches b ON b.id=f.branch_id ORDER BY CASE WHEN f.status='pending' THEN 0 ELSE 1 END, f.scheduled_at ASC, f.id DESC LIMIT 300`).all(),
+      db.prepare(`SELECT f.form_key AS formKey, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('lead','call','lead_details','followup') ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
-    return Response.json({ leads: leads.results, calls: calls.results, leadFields: forms.results.filter((field) => field.formKey === "lead"), callFields: forms.results.filter((field) => field.formKey === "call"), leadDetailsFields: forms.results.filter((field) => field.formKey === "lead_details") });
+    return Response.json({ leads: leads.results, calls: calls.results, followups: followups.results, leadFields: forms.results.filter((field) => field.formKey === "lead"), callFields: forms.results.filter((field) => field.formKey === "call"), leadDetailsFields: forms.results.filter((field) => field.formKey === "lead_details"), followupFields: forms.results.filter((field) => field.formKey === "followup") });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "تعذر تحميل بيانات العملاء" }, { status: 500 });
   }
@@ -69,6 +70,39 @@ export async function POST(request: Request) {
       const result = await db.prepare(`INSERT INTO call_records (lead_id, phone, direction, result, assigned_employee_id, branch_id, call_at, notes, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(lead?.id ?? null, phone, direction, resultMap[String(payload.result)] ?? "no_answer", Number(payload.assignedEmployeeId) || null, lead?.branchId ?? (Number(payload.branchId) || null), String(payload.callAt ?? new Date().toISOString()), String(payload.notes ?? ""), JSON.stringify(payload.customData ?? {})).run();
       return Response.json({ id: result.meta.last_row_id, matchedLead: Boolean(lead) }, { status: 201 });
+    }
+    if (action === "createFollowup") {
+      const leadId = Number(payload.leadId);
+      const scheduledDate = new Date(String(payload.scheduledAt ?? ""));
+      if (!leadId || Number.isNaN(scheduledDate.getTime())) return Response.json({ error: "العميل وموعد المتابعة مطلوبان" }, { status: 400 });
+      const lead = await db.prepare("SELECT id, assigned_employee_id AS assignedEmployeeId, branch_id AS branchId FROM leads WHERE id=?").bind(leadId).first<{ id: number; assignedEmployeeId: number | null; branchId: number | null }>();
+      if (!lead) return Response.json({ error: "العميل غير موجود" }, { status: 404 });
+      const channelMap: Record<string, string> = { "مكالمة": "call", "واتساب": "whatsapp", "رسالة": "message", "زيارة": "visit", "اجتماع أونلاين": "online_meeting" };
+      const priorityMap: Record<string, string> = { "عادية": "normal", "مرتفعة": "high", "عاجلة": "urgent" };
+      const standard = new Set(["scheduledAt", "assignedEmployeeId", "channel", "priority", "notes"]);
+      const customData = Object.fromEntries(Object.entries(payload).filter(([key]) => !standard.has(key) && key !== "action" && key !== "leadId"));
+      const result = await db.prepare("INSERT INTO followups (lead_id, assigned_employee_id, branch_id, scheduled_at, channel, priority, notes, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(lead.id, Number(payload.assignedEmployeeId) || lead.assignedEmployeeId, lead.branchId, scheduledDate.toISOString(), channelMap[String(payload.channel)] ?? "call", priorityMap[String(payload.priority)] ?? "normal", String(payload.notes ?? "").trim(), JSON.stringify(customData)).run();
+      await db.prepare("UPDATE leads SET status='followup', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(lead.id).run();
+      return Response.json({ id: result.meta.last_row_id }, { status: 201 });
+    }
+    if (action === "completeFollowup") {
+      const id = Number(payload.id);
+      const followup = await db.prepare("SELECT lead_id AS leadId FROM followups WHERE id=? AND status='pending'").bind(id).first<{ leadId: number }>();
+      if (!followup) return Response.json({ error: "المتابعة غير موجودة أو تم إنهاؤها" }, { status: 404 });
+      const outcome = String(payload.outcome ?? "").trim();
+      if (!outcome) return Response.json({ error: "نتيجة المتابعة مطلوبة" }, { status: 400 });
+      await db.prepare("UPDATE followups SET status='completed', outcome=?, completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(outcome, id).run();
+      const pending = await db.prepare("SELECT COUNT(*) AS count FROM followups WHERE lead_id=? AND status='pending'").bind(followup.leadId).first<{ count: number }>();
+      if ((pending?.count ?? 0) === 0) await db.prepare("UPDATE leads SET status='contacted', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(followup.leadId).run();
+      return Response.json({ ok: true });
+    }
+    if (action === "rescheduleFollowup") {
+      const id = Number(payload.id);
+      const scheduledDate = new Date(String(payload.scheduledAt ?? ""));
+      if (!id || Number.isNaN(scheduledDate.getTime())) return Response.json({ error: "موعد جديد صحيح مطلوب" }, { status: 400 });
+      await db.prepare("UPDATE followups SET scheduled_at=?, status='pending', completed_at=NULL WHERE id=?").bind(scheduledDate.toISOString(), id).run();
+      return Response.json({ ok: true });
     }
     return Response.json({ error: "إجراء غير مدعوم" }, { status: 400 });
   } catch (error) {

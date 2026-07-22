@@ -39,6 +39,14 @@ const callFields = [
   ["notes", "ملاحظات المكالمة", "textarea", "اكتب ملخص المكالمة", 0, 1, 7, "full", "[]"],
 ];
 
+const followupFields = [
+  ["scheduledAt", "موعد المتابعة", "datetime-local", "", 1, 1, 1, "full", "[]"],
+  ["assignedEmployeeId", "الموظف المسؤول", "select", "اختر الموظف", 1, 1, 2, "half", "[]"],
+  ["channel", "وسيلة المتابعة", "select", "اختر الوسيلة", 1, 1, 3, "half", '["مكالمة","واتساب","رسالة","زيارة","اجتماع أونلاين"]'],
+  ["priority", "الأولوية", "select", "اختر الأولوية", 1, 1, 4, "half", '["عادية","مرتفعة","عاجلة"]'],
+  ["notes", "هدف المتابعة وملاحظاتها", "textarea", "اكتب ما يجب متابعته مع العميل", 1, 1, 5, "full", "[]"],
+];
+
 export async function ensurePhaseTwo() {
   if (!ready) ready = initialize();
   return ready;
@@ -50,9 +58,12 @@ async function initialize() {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS leads (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, primary_phone TEXT NOT NULL, normalized_phone TEXT NOT NULL, secondary_phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'غير محدد', campaign TEXT NOT NULL DEFAULT '', interest TEXT NOT NULL DEFAULT '', assigned_employee_id INTEGER REFERENCES employees(id), status TEXT NOT NULL DEFAULT 'new', priority TEXT NOT NULL DEFAULT 'normal', notes TEXT NOT NULL DEFAULT '', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare(`CREATE TABLE IF NOT EXISTS call_records (id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER REFERENCES leads(id), phone TEXT NOT NULL, direction TEXT NOT NULL DEFAULT 'outgoing', result TEXT NOT NULL DEFAULT 'no_answer', assigned_employee_id INTEGER REFERENCES employees(id), call_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, notes TEXT NOT NULL DEFAULT '', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS followups (id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL REFERENCES leads(id), assigned_employee_id INTEGER REFERENCES employees(id), branch_id INTEGER REFERENCES branches(id), scheduled_at TEXT NOT NULL, channel TEXT NOT NULL DEFAULT 'call', status TEXT NOT NULL DEFAULT 'pending', priority TEXT NOT NULL DEFAULT 'normal', notes TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '', custom_data TEXT NOT NULL DEFAULT '{}', completed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS leads_phone_idx ON leads (normalized_phone)"),
     db.prepare("CREATE INDEX IF NOT EXISTS calls_lead_idx ON call_records (lead_id, call_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS leads_assignee_idx ON leads (assigned_employee_id, status)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS followups_due_idx ON followups (status, scheduled_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS followups_employee_idx ON followups (assigned_employee_id, status)"),
   ]);
   const leadColumns = await db.prepare("PRAGMA table_info(leads)").all<{ name: string }>();
   if (!leadColumns.results.some((column) => column.name === "branch_id")) await db.prepare("ALTER TABLE leads ADD COLUMN branch_id INTEGER REFERENCES branches(id)").run();
@@ -60,16 +71,19 @@ async function initialize() {
   if (!callColumns.results.some((column) => column.name === "branch_id")) await db.prepare("ALTER TABLE call_records ADD COLUMN branch_id INTEGER REFERENCES branches(id)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS leads_branch_idx ON leads (branch_id)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS calls_branch_idx ON call_records (branch_id)").run();
+  const followupColumns = await db.prepare("PRAGMA table_info(followups)").all<{ name: string }>();
+  if (!followupColumns.results.some((column) => column.name === "custom_data")) await db.prepare("ALTER TABLE followups ADD COLUMN custom_data TEXT NOT NULL DEFAULT '{}'").run();
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('lead', 'بيانات العميل المحتمل', 'الحقول المستخدمة عند تسجيل Lead جديدة')"),
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('call', 'بيانات المكالمة', 'الحقول المستخدمة عند تسجيل مكالمة')"),
     db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('lead_details', 'استكمال بيانات العميل', 'البيانات التفصيلية التي يضيفها موظف المبيعات')"),
+    db.prepare("INSERT OR IGNORE INTO form_definitions (form_key, name, description) VALUES ('followup', 'بيانات المتابعة', 'الحقول المستخدمة عند جدولة متابعة للعميل')"),
   ]);
-  const forms = await db.prepare("SELECT id, form_key AS formKey FROM form_definitions WHERE form_key IN ('lead','call','lead_details')").all<{ id: number; formKey: string }>();
+  const forms = await db.prepare("SELECT id, form_key AS formKey FROM form_definitions WHERE form_key IN ('lead','call','lead_details','followup')").all<{ id: number; formKey: string }>();
   const leadForm = forms.results.find((form) => form.formKey === "lead");
   if (leadForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key NOT IN ('fullName','primaryPhone','secondaryPhone','source','course','branchId','notes')").bind(leadForm.id).run();
   const query = `INSERT INTO form_fields (form_id, field_key, label, type, placeholder, required, visible, sort_order, width, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(form_id, field_key) DO UPDATE SET label=excluded.label, type=excluded.type, placeholder=excluded.placeholder, sort_order=excluded.sort_order, width=excluded.width, options_json=excluded.options_json`;
-  const batches = forms.results.flatMap((form) => (form.formKey === "lead" ? leadFields : form.formKey === "call" ? callFields : leadDetailsFields).map((field) => db.prepare(query).bind(form.id, ...field)));
+  const batches = forms.results.flatMap((form) => (form.formKey === "lead" ? leadFields : form.formKey === "call" ? callFields : form.formKey === "followup" ? followupFields : leadDetailsFields).map((field) => db.prepare(query).bind(form.id, ...field)));
   if (batches.length) await db.batch(batches);
 }
 

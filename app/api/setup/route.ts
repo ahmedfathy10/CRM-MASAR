@@ -12,7 +12,7 @@ export async function GET() {
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
       db.prepare(`SELECT e.id, e.full_name AS fullName, e.email, e.phone, e.status, e.department_id AS departmentId, e.job_title_id AS jobTitleId, e.role_id AS roleId, e.branch_id AS branchId, d.name AS department, j.name AS jobTitle, r.name AS role, b.name AS branchName FROM employees e LEFT JOIN departments d ON d.id=e.department_id LEFT JOIN job_titles j ON j.id=e.job_title_id LEFT JOIN roles r ON r.id=e.role_id LEFT JOIN branches b ON b.id=e.branch_id ORDER BY e.id DESC`).all(),
-      db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
+      db.prepare(`SELECT b.id, b.name, b.address, b.primary_phone AS primaryPhone, b.secondary_phone AS secondaryPhone, b.email, b.social_url AS socialUrl, b.is_active AS isActive, b.custom_data AS customData, (SELECT COUNT(*) FROM employees e WHERE e.branch_id=b.id) AS employeeCount, (SELECT COUNT(*) FROM leads l WHERE l.branch_id=b.id) AS leadCount, (SELECT COUNT(*) FROM call_records c WHERE c.branch_id=b.id) AS callCount FROM branches b ORDER BY b.id`).all(),
       db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('employee','branch') ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
     return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch") });
@@ -44,12 +44,12 @@ export async function POST(request: Request) {
       const address = String(payload.address ?? "").trim();
       const primaryPhone = String(payload.primaryPhone ?? "").trim();
       if (!name || !address || !primaryPhone) return Response.json({ error: "اسم الفرع والعنوان ورقم الهاتف الأساسي مطلوبة" }, { status: 400 });
-      const values = [name, address, primaryPhone, String(payload.secondaryPhone ?? "").trim(), String(payload.email ?? "").trim().toLowerCase(), String(payload.socialUrl ?? "").trim(), String(payload.isActive ?? "نشط") === "غير نشط" ? 0 : 1];
+      const values = [name, address, primaryPhone, String(payload.secondaryPhone ?? "").trim(), String(payload.email ?? "").trim().toLowerCase(), String(payload.socialUrl ?? "").trim(), String(payload.isActive ?? "نشط") === "غير نشط" ? 0 : 1, JSON.stringify(payload.customData ?? {})];
       if (action === "updateBranch") {
-        await db.prepare("UPDATE branches SET name=?, address=?, primary_phone=?, secondary_phone=?, email=?, social_url=?, is_active=? WHERE id=?").bind(...values, Number(payload.id)).run();
+        await db.prepare("UPDATE branches SET name=?, address=?, primary_phone=?, secondary_phone=?, email=?, social_url=?, is_active=?, custom_data=? WHERE id=?").bind(...values, Number(payload.id)).run();
         return Response.json({ ok: true });
       }
-      const result = await db.prepare("INSERT INTO branches (name, address, primary_phone, secondary_phone, email, social_url, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(...values).run();
+      const result = await db.prepare("INSERT INTO branches (name, address, primary_phone, secondary_phone, email, social_url, is_active, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(...values).run();
       return Response.json({ id: result.meta.last_row_id }, { status: 201 });
     }
 
@@ -105,7 +105,10 @@ export async function POST(request: Request) {
     if (action === "addField") {
       const label = String(payload.label ?? "").trim();
       if (!label) return Response.json({ error: "اسم الحقل مطلوب" }, { status: 400 });
-      const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key='employee'").first<{ id: number }>();
+      const requestedForm = String(payload.formKey ?? "employee");
+      const allowedForms = new Set(["employee", "branch", "lead", "call", "lead_details", "followup"]);
+      if (!allowedForms.has(requestedForm)) return Response.json({ error: "النموذج المطلوب غير مدعوم" }, { status: 400 });
+      const form = await db.prepare("SELECT id FROM form_definitions WHERE form_key=?").bind(requestedForm).first<{ id: number }>();
       if (!form) throw new Error("تعريف النموذج غير موجود");
       const order = await db.prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS nextOrder FROM form_fields WHERE form_id=?").bind(form.id).first<{ nextOrder: number }>();
       const fieldKey = `custom_${Date.now()}`;

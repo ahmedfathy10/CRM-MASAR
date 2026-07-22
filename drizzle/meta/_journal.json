@@ -29,6 +29,20 @@
       "when": 1784678122225,
       "tag": "0003_military_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784679294708,
+      "tag": "0004_silent_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784679796616,
+      "tag": "0005_known_shotgun",
+      "breakpoints": true
     }
   ]
 }

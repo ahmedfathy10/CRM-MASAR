@@ -42,6 +42,7 @@ export const branches = sqliteTable("branches", {
   email: text("email").notNull().default(""),
   socialUrl: text("social_url").notNull().default(""),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  customData: text("custom_data").notNull().default("{}"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -115,5 +116,21 @@ export const callRecords = sqliteTable("call_records", {
   callAt: text("call_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   notes: text("notes").notNull().default(""),
   customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const followups = sqliteTable("followups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  leadId: integer("lead_id").notNull().references(() => leads.id),
+  assignedEmployeeId: integer("assigned_employee_id").references(() => employees.id),
+  branchId: integer("branch_id").references(() => branches.id),
+  scheduledAt: text("scheduled_at").notNull(),
+  channel: text("channel").notNull().default("call"),
+  status: text("status").notNull().default("pending"),
+  priority: text("priority").notNull().default("normal"),
+  notes: text("notes").notNull().default(""),
+  outcome: text("outcome").notNull().default(""),
+  customData: text("custom_data").notNull().default("{}"),
+  completedAt: text("completed_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
