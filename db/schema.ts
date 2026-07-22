@@ -84,6 +84,14 @@ export const settingsEntities = sqliteTable("settings_entities", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const students = sqliteTable("students", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  fullName: text("full_name").notNull(),
+  mobile: text("mobile").notNull().default(""),
+  levelId: integer("level_id").notNull().references(() => settingsEntities.id),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const groupMembers = sqliteTable("group_members", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   groupId: integer("group_id").notNull().references(() => settingsEntities.id),

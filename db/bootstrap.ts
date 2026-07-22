@@ -13,6 +13,8 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS time_slots (id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER REFERENCES tracks(id), title TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE TABLE IF NOT EXISTS settings_entities (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, title TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS settings_entities_kind_idx ON settings_entities (kind, title)`,
+  `CREATE TABLE IF NOT EXISTS students (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, mobile TEXT NOT NULL DEFAULT '', level_id INTEGER NOT NULL REFERENCES settings_entities(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  `CREATE INDEX IF NOT EXISTS students_level_idx ON students (level_id, full_name)`,
   `CREATE TABLE IF NOT EXISTS group_members (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL REFERENCES settings_entities(id), student_reference TEXT NOT NULL, joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS group_members_unique_idx ON group_members (group_id, student_reference)`,
   `CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL DEFAULT '', department_id INTEGER REFERENCES departments(id), job_title_id INTEGER REFERENCES job_titles(id), role_id INTEGER REFERENCES roles(id), branch_id INTEGER REFERENCES branches(id), status TEXT NOT NULL DEFAULT 'invited', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
@@ -177,4 +179,5 @@ async function initialize() {
   if (batchForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key IN ('branchId','levelId','studyTypeId','timeSlotId','endDate')").bind(batchForm.id).run();
   const groupForm = await db.prepare("SELECT id FROM form_definitions WHERE form_key='group'").first<{id:number}>();
   if (groupForm) await db.prepare("DELETE FROM form_fields WHERE form_id=? AND field_key IN ('title','capacity','isActive')").bind(groupForm.id).run();
+  await db.prepare("UPDATE settings_entities SET title=CAST(id AS TEXT) WHERE kind='group' AND title LIKE 'GRP-%'").run();
 }

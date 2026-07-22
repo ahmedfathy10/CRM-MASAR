@@ -7,7 +7,7 @@ export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
-    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, settingsEntities, forms] = await Promise.all([
+    const [departments, jobTitles, roles, employees, branches, classrooms, tracks, timeSlots, settingsEntities, forms, students, groupMembers] = await Promise.all([
       db.prepare("SELECT d.id, d.name, d.color, d.parent_id AS parentId, d.support_enabled AS supportEnabled, d.is_active AS isActive, p.name AS parentName, (SELECT COUNT(*) FROM job_titles j WHERE j.department_id=d.id) AS jobCount FROM departments d LEFT JOIN departments p ON p.id=d.parent_id ORDER BY d.id").all(),
       db.prepare("SELECT j.id, j.name, j.department_id AS departmentId, d.name AS department FROM job_titles j LEFT JOIN departments d ON d.id=j.department_id ORDER BY d.name, j.name").all(),
       db.prepare("SELECT id, name, description FROM roles ORDER BY id").all(),
@@ -18,8 +18,10 @@ export async function GET() {
       db.prepare(`SELECT ts.id, ts.track_id AS trackId, t.title AS trackName, ts.title, ts.start_time AS startTime, ts.end_time AS endTime, ts.is_active AS isActive, ts.custom_data AS customData FROM time_slots ts LEFT JOIN tracks t ON t.id=ts.track_id ORDER BY t.title, ts.start_time`).all(),
       db.prepare(`SELECT se.id, se.kind, se.title, se.is_active AS isActive, se.custom_data AS customData, CASE WHEN se.kind='group' THEN (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id=se.id) ELSE 0 END AS studentCount FROM settings_entities se ORDER BY se.kind, se.title`).all(),
       db.prepare(`SELECT f.id AS formId, f.form_key AS formKey, f.name AS formName, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id ORDER BY f.form_key, ff.sort_order`).all(),
+      db.prepare(`SELECT s.id, s.full_name AS fullName, s.mobile, s.level_id AS levelId, l.title AS levelName FROM students s LEFT JOIN settings_entities l ON l.id=s.level_id ORDER BY s.full_name`).all(),
+      db.prepare(`SELECT gm.id, gm.group_id AS groupId, CAST(gm.student_reference AS INTEGER) AS studentId, gm.joined_at AS joinedAt, s.full_name AS fullName, s.mobile, s.level_id AS levelId FROM group_members gm JOIN students s ON s.id=CAST(gm.student_reference AS INTEGER) ORDER BY gm.joined_at DESC`).all(),
     ]);
-    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, settingsEntities: settingsEntities.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot"), catalogFields: Object.fromEntries(["round","study_type","level","education_batch","group","setup_card","exam"].map((key)=>[key,forms.results.filter((field)=>field.formKey===key)])) });
+    return Response.json({ departments: departments.results, jobTitles: jobTitles.results, roles: roles.results, employees: employees.results, branches: branches.results, classrooms: classrooms.results, tracks: tracks.results, timeSlots: timeSlots.results, settingsEntities: settingsEntities.results, students:students.results, groupMembers:groupMembers.results, fields: forms.results.filter((field) => field.formKey === "employee"), branchFields: forms.results.filter((field) => field.formKey === "branch"), classroomFields: forms.results.filter((field) => field.formKey === "classroom"), trackFields: forms.results.filter((field) => field.formKey === "track"), timeSlotFields: forms.results.filter((field) => field.formKey === "time_slot"), catalogFields: Object.fromEntries(["round","study_type","level","education_batch","group","setup_card","exam"].map((key)=>[key,forms.results.filter((field)=>field.formKey===key)])) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "تعذر تحميل البيانات" }, { status: 500 });
   }
@@ -141,6 +143,30 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if(action==="assignGroupStaff") {
+      const id=Number(payload.id), role=String(payload.role), employeeId=Number(payload.employeeId);
+      if(!id||!["teacher","admin"].includes(role)||!employeeId) return Response.json({error:"بيانات الموظف غير مكتملة"},{status:400});
+      const group=await db.prepare("SELECT custom_data AS customData FROM settings_entities WHERE id=? AND kind='group'").bind(id).first<{customData:string}>();
+      const employee=await db.prepare("SELECT id FROM employees WHERE id=? AND status='active'").bind(employeeId).first();
+      if(!group||!employee) return Response.json({error:"الجروب أو الموظف غير موجود"},{status:404});
+      const details=JSON.parse(group.customData||"{}") as Record<string,unknown>; details[`${role}Id`]=employeeId;
+      await db.prepare("UPDATE settings_entities SET custom_data=? WHERE id=?").bind(JSON.stringify(details),id).run();
+      return Response.json({ok:true});
+    }
+
+    if(action==="addGroupStudent") {
+      const groupId=Number(payload.groupId),studentId=Number(payload.studentId);
+      const group=await db.prepare("SELECT custom_data AS customData FROM settings_entities WHERE id=? AND kind='group'").bind(groupId).first<{customData:string}>();
+      const student=await db.prepare("SELECT id,level_id AS levelId FROM students WHERE id=?").bind(studentId).first<{id:number;levelId:number}>();
+      if(!group||!student)return Response.json({error:"الجروب أو الطالب غير موجود"},{status:404});
+      const details=JSON.parse(group.customData||"{}") as Record<string,unknown>;
+      if(Number(details.levelId)!==Number(student.levelId))return Response.json({error:"لا يمكن إضافة الطالب لأن مستواه لا يطابق مستوى الجروب"},{status:409});
+      await db.prepare("INSERT OR IGNORE INTO group_members (group_id,student_reference) VALUES (?,?)").bind(groupId,String(studentId)).run();
+      return Response.json({ok:true},{status:201});
+    }
+
+    if(action==="removeGroupStudent") { await db.prepare("DELETE FROM group_members WHERE group_id=? AND student_reference=?").bind(Number(payload.groupId),String(payload.studentId)).run(); return Response.json({ok:true}); }
+
     if (action === "createSettingsEntity" || action === "updateSettingsEntity") {
       const allowedKinds=new Set(["round","study_type","level","education_batch","group","setup_card","exam"]);
       const kind=String(payload.kind??"");
@@ -172,7 +198,7 @@ export async function POST(request: Request) {
           const targetBatchDetails=JSON.parse(targetBatch.customData||"{}") as Record<string,unknown>;
           const nextDetails:Record<string,unknown>={...details,batchId:targetBatch.id,levelId:targetLevel.id,startDate:step===0?startDate:String(targetBatchDetails.startDate??startDate),progressionRootId:rootId||undefined,previousGroupId:previousId||undefined,sequenceIndex:step};
           const inserted=await db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) VALUES ('group',?,1,?)").bind(`PENDING-${Date.now()}-${step}`,JSON.stringify(nextDetails)).run();
-          const newId=Number(inserted.meta.last_row_id), groupId=`GRP-${String(newId).padStart(6,"0")}`;
+          const newId=Number(inserted.meta.last_row_id), groupId=String(newId);
           if(!rootId)rootId=newId; nextDetails.progressionRootId=rootId;
           await db.prepare("UPDATE settings_entities SET title=?,custom_data=? WHERE id=?").bind(groupId,JSON.stringify(nextDetails),newId).run();
           previousId=newId;created++;
