@@ -199,6 +199,15 @@ export async function POST(request: Request) {
       if(!allowedKinds.has(kind)) return Response.json({error:"نوع الإعداد غير مدعوم"},{status:400});
       const details=(payload.customData??{}) as Record<string,unknown>;
       const id=action==="updateSettingsEntity"?Number(payload.id):0;
+      if(kind==="education_batch") {
+        const trackId=Number(details.trackId);
+        const batchStatus=String(details.batchStatus??"");
+        if(!trackId||!["Current Batch","Not Current"].includes(batchStatus)) return Response.json({error:"اختر الـTrack وحالة الدفعة"},{status:400});
+        if(batchStatus==="Current Batch") {
+          const current=await db.prepare("SELECT title FROM settings_entities WHERE kind='education_batch' AND id<>? AND CAST(json_extract(custom_data,'$.trackId') AS INTEGER)=? AND COALESCE(json_extract(custom_data,'$.batchStatus'),'Current Batch')='Current Batch' LIMIT 1").bind(id,trackId).first<{title:string}>();
+          if(current) return Response.json({error:`يوجد بالفعل Current Batch لهذا الـTrack: ${current.title}. غيّر حالته إلى Not Current أولًا.`},{status:409});
+        }
+      }
       if(kind==="group") {
         const batchId=Number(details.batchId), levelId=Number(details.levelId), roundId=Number(details.roundId);
         const startDate=String(details.startDate??"").trim();
