@@ -3,13 +3,17 @@ import { ensurePhaseTwo, normalizePhone } from "@/db/phase-two";
 
 export const dynamic = "force-dynamic";
 
+function tokenFrom(request: Request) {
+  return request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith("masar_session="))?.slice("masar_session=".length) ?? "";
+}
+
 export async function GET() {
   try {
     await ensurePhaseTwo();
     const db = env.DB;
     const [leads, calls, followups, forms] = await Promise.all([
       db.prepare(`SELECT l.id, l.full_name AS fullName, l.primary_phone AS primaryPhone, l.secondary_phone AS secondaryPhone, l.email, l.source, l.campaign, l.interest, l.status, CASE WHEN l.status='paid' THEN 'Paid' WHEN l.status='registered' THEN 'Registered' ELSE 'Not Yet' END AS finalStatus, l.priority, l.notes, l.custom_data AS customData, l.assigned_employee_id AS assignedEmployeeId, l.branch_id AS branchId, l.created_at AS createdAt, e.full_name AS assignedEmployee, b.name AS branchName, (SELECT COUNT(*) FROM call_records c WHERE c.lead_id=l.id) AS callCount, (SELECT c.result FROM call_records c WHERE c.lead_id=l.id ORDER BY c.call_at DESC, c.id DESC LIMIT 1) AS lastCallResult, (SELECT ce.full_name FROM call_records c LEFT JOIN employees ce ON ce.id=c.assigned_employee_id WHERE c.lead_id=l.id ORDER BY c.call_at DESC, c.id DESC LIMIT 1) AS lastCallBy FROM leads l LEFT JOIN employees e ON e.id=l.assigned_employee_id LEFT JOIN branches b ON b.id=l.branch_id ORDER BY l.id DESC LIMIT 200`).all(),
-      db.prepare(`SELECT c.id, c.lead_id AS leadId, c.phone, c.direction, c.result, c.assigned_employee_id AS assignedEmployeeId, c.branch_id AS branchId, c.call_at AS callAt, c.notes, e.full_name AS assignedEmployee, l.full_name AS leadName, b.name AS branchName FROM call_records c LEFT JOIN employees e ON e.id=c.assigned_employee_id LEFT JOIN leads l ON l.id=c.lead_id LEFT JOIN branches b ON b.id=c.branch_id ORDER BY c.call_at DESC, c.id DESC LIMIT 200`).all(),
+      db.prepare(`SELECT c.id, c.lead_id AS leadId, c.phone, c.direction, c.result, c.assigned_employee_id AS assignedEmployeeId, c.branch_id AS branchId, c.call_at AS callAt, c.notes, c.custom_data AS customData, e.full_name AS assignedEmployee, l.full_name AS leadName, b.name AS branchName FROM call_records c LEFT JOIN employees e ON e.id=c.assigned_employee_id LEFT JOIN leads l ON l.id=c.lead_id LEFT JOIN branches b ON b.id=c.branch_id ORDER BY c.call_at DESC, c.id DESC LIMIT 200`).all(),
       db.prepare(`SELECT f.id, f.lead_id AS leadId, f.assigned_employee_id AS assignedEmployeeId, f.branch_id AS branchId, f.scheduled_at AS scheduledAt, f.channel, f.status, f.priority, f.notes, f.outcome, f.custom_data AS customData, f.completed_at AS completedAt, f.created_at AS createdAt, l.full_name AS leadName, l.primary_phone AS leadPhone, e.full_name AS assignedEmployee, b.name AS branchName FROM followups f JOIN leads l ON l.id=f.lead_id LEFT JOIN employees e ON e.id=f.assigned_employee_id LEFT JOIN branches b ON b.id=f.branch_id ORDER BY CASE WHEN f.status='pending' THEN 0 ELSE 1 END, f.scheduled_at ASC, f.id DESC LIMIT 300`).all(),
       db.prepare(`SELECT f.form_key AS formKey, f.version, ff.id, ff.field_key AS fieldKey, ff.label, ff.type, ff.placeholder, ff.required, ff.visible, ff.sort_order AS sortOrder, ff.options_json AS optionsJson, ff.width FROM form_definitions f JOIN form_fields ff ON ff.form_id=f.id WHERE f.form_key IN ('lead','call','lead_details','followup') ORDER BY f.form_key, ff.sort_order`).all(),
     ]);
@@ -78,10 +82,13 @@ export async function POST(request: Request) {
       const phone = String(payload.phone ?? "").trim(); const normalizedPhone = normalizePhone(phone);
       if (normalizedPhone.length < 8) return Response.json({ error: "رقم هاتف صحيح مطلوب" }, { status: 400 });
       const lead = await db.prepare("SELECT id, branch_id AS branchId FROM leads WHERE normalized_phone=?").bind(normalizedPhone).first<{ id: number; branchId: number | null }>();
+      const token=tokenFrom(request);
+      const sessionEmployee=token?await db.prepare("SELECT e.id FROM employee_sessions s JOIN employees e ON e.id=s.employee_id WHERE s.token=? AND s.expires_at>? LIMIT 1").bind(token,new Date().toISOString()).first<{id:number}>():null;
+      const assignee=Number(payload.assignedEmployeeId)||sessionEmployee?.id||(await db.prepare("SELECT id FROM employees WHERE status IN ('active','نشط') ORDER BY id LIMIT 1").first<{id:number}>())?.id||null;
       const direction = String(payload.direction) === "واردة" ? "incoming" : "outgoing";
       const resultMap: Record<string, string> = { "تم الرد": "answered", "لم يرد": "no_answer", "مشغول": "busy", "رقم خاطئ": "wrong_number", "طلب معاودة الاتصال": "callback" };
       const result = await db.prepare(`INSERT INTO call_records (lead_id, phone, direction, result, assigned_employee_id, branch_id, call_at, notes, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(lead?.id ?? null, phone, direction, resultMap[String(payload.result)] ?? "no_answer", Number(payload.assignedEmployeeId) || null, lead?.branchId ?? (Number(payload.branchId) || null), String(payload.callAt ?? new Date().toISOString()), String(payload.notes ?? ""), JSON.stringify(payload.customData ?? {})).run();
+        .bind(lead?.id ?? null, phone, direction, resultMap[String(payload.result)] ?? "no_answer", assignee, lead?.branchId ?? (Number(payload.branchId) || null), String(payload.callAt ?? new Date().toISOString()), String(payload.notes ?? ""), JSON.stringify(payload.customData ?? {})).run();
       return Response.json({ id: result.meta.last_row_id, matchedLead: Boolean(lead) }, { status: 201 });
     }
     if (action === "createFollowup") {
