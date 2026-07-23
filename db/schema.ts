@@ -116,6 +116,7 @@ export const employees = sqliteTable("employees", {
   fullName: text("full_name").notNull(),
   email: text("email").notNull(),
   phone: text("phone").notNull().default(""),
+  passwordHash: text("password_hash").notNull().default(""),
   departmentId: integer("department_id").references(() => departments.id),
   jobTitleId: integer("job_title_id").references(() => jobTitles.id),
   roleId: integer("role_id").references(() => roles.id),
@@ -126,6 +127,14 @@ export const employees = sqliteTable("employees", {
   customData: text("custom_data").notNull().default("{}"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("employees_email_idx").on(table.email)]);
+
+export const employeeSessions = sqliteTable("employee_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  token: text("token").notNull().unique(),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("employee_sessions_token_idx").on(table.token)]);
 
 export const formDefinitions = sqliteTable("form_definitions", {
   id: integer("id").primaryKey({ autoIncrement: true }),

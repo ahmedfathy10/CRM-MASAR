@@ -50,6 +50,20 @@ export async function POST(request: Request) {
         .bind(String(details.source ?? payload.source ?? "غير محدد"), String(details.interest ?? details.course ?? ""), String(details.detailsNotes ?? payload.notes ?? ""), JSON.stringify(merged), id).run();
       return Response.json({ ok: true });
     }
+    if (action === "convertLeadToStudent") {
+      const leadId = Number(payload.leadId);
+      const levelId = Number(payload.levelId);
+      if (!leadId || !levelId) return Response.json({ error: "اختر مستوى الطالب أولاً" }, { status: 400 });
+      const lead = await db.prepare("SELECT id, full_name AS fullName, primary_phone AS mobile, custom_data AS customData FROM leads WHERE id=?").bind(leadId).first<{ id:number; fullName:string; mobile:string; customData:string }>();
+      const level = await db.prepare("SELECT id FROM settings_entities WHERE id=? AND kind='level'").bind(levelId).first();
+      if (!lead || !level) return Response.json({ error: "العميل أو المستوى غير موجود" }, { status: 404 });
+      const existing = await db.prepare("SELECT id FROM students WHERE mobile=?").bind(lead.mobile).first<{ id:number }>();
+      if (existing) return Response.json({ error: "هذا العميل مسجل كطالب بالفعل" }, { status: 409 });
+      const result = await db.prepare("INSERT INTO students (full_name, mobile, level_id) VALUES (?, ?, ?)").bind(lead.fullName, lead.mobile, levelId).run();
+      let customData:Record<string,unknown>={}; try { customData=JSON.parse(lead.customData||"{}") as Record<string,unknown>; } catch {}
+      await db.prepare("UPDATE leads SET status='registered', custom_data=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({ ...customData, studentId:result.meta.last_row_id, convertedAt:new Date().toISOString() }), leadId).run();
+      return Response.json({ id: result.meta.last_row_id }, { status: 201 });
+    }
     if (action === "recordLeadCallResult") {
       const id = Number(payload.id);
       const lead = await db.prepare("SELECT id, primary_phone AS phone, assigned_employee_id AS assignedEmployeeId, branch_id AS branchId FROM leads WHERE id=?").bind(id).first<{ id: number; phone: string; assignedEmployeeId: number | null; branchId: number | null }>();

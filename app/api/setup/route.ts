@@ -3,6 +3,12 @@ import { ensurePhaseTwo } from "@/db/phase-two";
 
 export const dynamic = "force-dynamic";
 
+async function hashPassword(password: string) {
+  const bytes = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
 export async function GET() {
   try {
     await ensurePhaseTwo();
@@ -41,8 +47,12 @@ export async function POST(request: Request) {
       if (!fullName || !email) return Response.json({ error: "الاسم والبريد الإلكتروني مطلوبان" }, { status: 400 });
       const requestedStatus = String(payload.status ?? "نشط");
       const departmentId=Number(payload.departmentId)||null;
-      const result = await db.prepare("INSERT INTO employees (hr_id, full_name, email, phone, department_id, job_title_id, role_id, branch_id, status, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind("PENDING", fullName, email, String(payload.phone ?? ""), departmentId, Number(payload.jobTitleId) || null, Number(payload.roleId) || null, Number(payload.branchId) || null, requestedStatus, JSON.stringify(payload.customData ?? {})).run();
+      const phone = String(payload.phone ?? "").trim();
+      if (!phone) return Response.json({ error: "رقم الموبايل مطلوب لأنه اسم المستخدم للدخول" }, { status: 400 });
+      const duplicatePhone = await db.prepare("SELECT id FROM employees WHERE phone=?").bind(phone).first();
+      if (duplicatePhone) return Response.json({ error: "رقم الموبايل مستخدم بالفعل كاسم دخول لموظف آخر" }, { status: 409 });
+      const result = await db.prepare("INSERT INTO employees (hr_id, full_name, email, phone, password_hash, department_id, job_title_id, role_id, branch_id, status, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind("PENDING", fullName, email, phone, await hashPassword("12345"), departmentId, Number(payload.jobTitleId) || null, Number(payload.roleId) || null, Number(payload.branchId) || null, requestedStatus, JSON.stringify(payload.customData ?? {})).run();
       const id=Number(result.meta.last_row_id); const department=departmentId?await db.prepare("SELECT name FROM departments WHERE id=?").bind(departmentId).first<{name:string}>():null;
       const prefix=(department?.name||"HR").replace(/\s+/g,"").slice(0,3).toUpperCase()||"HR"; const hrId=`${prefix}-${String(id).padStart(4,"0")}`;
       await db.prepare("UPDATE employees SET hr_id=? WHERE id=?").bind(hrId,id).run();
@@ -54,8 +64,18 @@ export async function POST(request: Request) {
       if(!id||!fullName||!email)return Response.json({error:"الاسم والبريد الإلكتروني مطلوبان"},{status:400});
       const duplicate=await db.prepare("SELECT id FROM employees WHERE LOWER(email)=LOWER(?) AND id<>?").bind(email,id).first();
       if(duplicate)return Response.json({error:"البريد الإلكتروني مستخدم لموظف آخر"},{status:409});
-      await db.prepare("UPDATE employees SET full_name=?,email=?,phone=?,department_id=?,job_title_id=?,branch_id=?,status=?,custom_data=? WHERE id=?").bind(fullName,email,String(payload.phone??""),Number(payload.departmentId)||null,Number(payload.jobTitleId)||null,Number(payload.branchId)||null,String(payload.status??"نشط"),JSON.stringify(payload.customData??{}),id).run();
+      const phone=String(payload.phone??"").trim(); if(!phone)return Response.json({error:"رقم الموبايل مطلوب"},{status:400});
+      const phoneDuplicate=await db.prepare("SELECT id FROM employees WHERE phone=? AND id<>?").bind(phone,id).first(); if(phoneDuplicate)return Response.json({error:"رقم الموبايل مستخدم بالفعل كاسم دخول لموظف آخر"},{status:409});
+      await db.prepare("UPDATE employees SET full_name=?,email=?,phone=?,department_id=?,job_title_id=?,branch_id=?,status=?,custom_data=? WHERE id=?").bind(fullName,email,phone,Number(payload.departmentId)||null,Number(payload.jobTitleId)||null,Number(payload.branchId)||null,String(payload.status??"نشط"),JSON.stringify(payload.customData??{}),id).run();
       return Response.json({ok:true});
+    }
+
+    if (action === "resetEmployeePassword") {
+      const id = Number(payload.id); const password = String(payload.password ?? "");
+      if (!id || password.length < 5) return Response.json({ error: "أدخل كلمة مرور من 5 أحرف على الأقل" }, { status: 400 });
+      await db.prepare("UPDATE employees SET password_hash=? WHERE id=?").bind(await hashPassword(password), id).run();
+      await db.prepare("DELETE FROM employee_sessions WHERE employee_id=?").bind(id).run();
+      return Response.json({ ok: true });
     }
 
     if (action === "deactivateEmployee") {
