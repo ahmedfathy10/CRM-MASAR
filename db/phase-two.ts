@@ -3,6 +3,10 @@ import { ensureDatabase } from "./bootstrap";
 
 let ready: Promise<void> | null = null;
 
+const paymentMethodSeeds = [
+  ["Klivvr POS Paymob",1],["TRU POS Paymob",1],["Halan POS Paymob",1],["Transferred from another track",1],["Value Link Paymob",1],["Sympl Link Paymob",1],["12M Bank Installment POS CIB",1],["6M Bank Installment POS CIB",1],["Seven POS Paymob",1],["Wallet Link Kashier",1],["Wallet POS Kashier",1],["Bank Installment POS Kashier",1],["Bank Installment Link Kashier",1],["Souhoola Link Kashier",1],["Aman Link Kashier",1],["Value Link Kashier",1],["Visa Link Kashier",1],["Visa POS CIB",1],["Souhoola POS Kashier",1],["Aman POS Kashier",1],["Value POS Kashier",1],["Visa POS Kashier",1],["Contact POS PayMob",1],["Khazna POS PayMob",1],["Forsa POS PayMob",1],["Souhoola POS PayMob",1],["Aman POS PayMob",1],["Symple POS PayMob",1],["Value POS PayMob",1],["Etisalat Cash",1],["Transferred from another Student",1],["Fawry Link",1],["Fawry Code",1],["Bank Transfer",1],["Paymob Link",1],["Visa POS PayMob",1],["Vodafone Cash",1],["Cash",0],
+] as const;
+
 const leadFields = [
   ["fullName", "اسم العميل", "text", "اكتب اسم العميل", 1, 1, 1, "full", "[]"],
   ["primaryPhone", "رقم الموبايل", "tel", "اكتب الرقم بكود الدولة", 1, 1, 2, "full", "[]"],
@@ -55,6 +59,8 @@ export async function ensurePhaseTwo() {
 async function initialize() {
   await ensureDatabase();
   const db = env.DB;
+  const paymentSeedMarker=await db.prepare("SELECT id FROM settings_entities WHERE kind='_seed_marker' AND title='payment_methods_v1'").first();
+  if(!paymentSeedMarker) await db.batch([...paymentMethodSeeds.map(([title,reference])=>db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) SELECT 'payment_method',?,1,? WHERE NOT EXISTS (SELECT 1 FROM settings_entities WHERE kind='payment_method' AND LOWER(title)=LOWER(?))").bind(title,JSON.stringify({reference:reference?"Yes":"No"}),title)),db.prepare("INSERT INTO settings_entities (kind,title,is_active,custom_data) VALUES ('_seed_marker','payment_methods_v1',1,'{}')")]);
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS leads (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, primary_phone TEXT NOT NULL, normalized_phone TEXT NOT NULL, secondary_phone TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'غير محدد', campaign TEXT NOT NULL DEFAULT '', interest TEXT NOT NULL DEFAULT '', assigned_employee_id INTEGER REFERENCES employees(id), status TEXT NOT NULL DEFAULT 'new', priority TEXT NOT NULL DEFAULT 'normal', notes TEXT NOT NULL DEFAULT '', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare(`CREATE TABLE IF NOT EXISTS call_records (id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER REFERENCES leads(id), phone TEXT NOT NULL, direction TEXT NOT NULL DEFAULT 'outgoing', result TEXT NOT NULL DEFAULT 'no_answer', assigned_employee_id INTEGER REFERENCES employees(id), call_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, notes TEXT NOT NULL DEFAULT '', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
