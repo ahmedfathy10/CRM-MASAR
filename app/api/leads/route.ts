@@ -78,6 +78,25 @@ export async function POST(request: Request) {
       await db.prepare("UPDATE leads SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(resultValue === "interested" ? "qualified" : resultValue === "not_interested" ? "unqualified" : "contacted", id).run();
       return Response.json({ ok: true }, { status: 201 });
     }
+    if (action === "convertCallToStudent") {
+      const callId=Number(payload.callId);
+      const call=await db.prepare("SELECT id,lead_id AS leadId,phone,assigned_employee_id AS assignedEmployeeId,branch_id AS branchId,custom_data AS customData FROM call_records WHERE id=?").bind(callId).first<{id:number;leadId:number|null;phone:string;assignedEmployeeId:number|null;branchId:number|null;customData:string}>();
+      if(!call)return Response.json({error:"المكالمة غير موجودة"},{status:404});
+      let details:Record<string,unknown>={};try{details=JSON.parse(call.customData||"{}") as Record<string,unknown>}catch{}
+      const normalizedPhone=normalizePhone(call.phone);
+      let lead=call.leadId?await db.prepare("SELECT id,status FROM leads WHERE id=?").bind(call.leadId).first<{id:number;status:string}>():await db.prepare("SELECT id,status FROM leads WHERE normalized_phone=?").bind(normalizedPhone).first<{id:number;status:string}>();
+      if(!lead){
+        const inserted=await db.prepare("INSERT INTO leads (full_name,primary_phone,normalized_phone,secondary_phone,source,interest,assigned_employee_id,branch_id,notes,custom_data) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(details.fullName||`عميل ${call.phone}`),call.phone,normalizedPhone,String(details.secondaryPhone||""),String(details.source||"غير محدد"),String(details.track||""),call.assignedEmployeeId,call.branchId,String(details.notes||""),JSON.stringify(details)).run();
+        lead={id:Number(inserted.meta.last_row_id),status:"new"};
+      }
+      const level=await db.prepare("SELECT id FROM settings_entities WHERE kind='level' AND is_active=1 ORDER BY id LIMIT 1").first<{id:number}>();
+      if(!level)return Response.json({error:"يجب إضافة مستوى نشط قبل تحويل العميل إلى طالب"},{status:409});
+      let student=await db.prepare("SELECT id FROM students WHERE mobile=? LIMIT 1").bind(call.phone).first<{id:number}>();
+      if(!student){const inserted=await db.prepare("INSERT INTO students (full_name,mobile,level_id) VALUES (?,?,?)").bind(String(details.fullName||`عميل ${call.phone}`),call.phone,level.id).run();student={id:Number(inserted.meta.last_row_id)}}
+      if(lead.status!=="paid")await db.prepare("UPDATE leads SET status='registered',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(lead.id).run();
+      await db.prepare("UPDATE call_records SET lead_id=? WHERE id=?").bind(lead.id,call.id).run();
+      return Response.json({studentId:student.id,leadId:lead.id},{status:201});
+    }
     if (action === "createCall") {
       const phone = String(payload.phone ?? "").trim(); const normalizedPhone = normalizePhone(phone);
       if (normalizedPhone.length < 8) return Response.json({ error: "رقم هاتف صحيح مطلوب" }, { status: 400 });
