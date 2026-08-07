@@ -1,91 +1,74 @@
-import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+﻿import assert from "node:assert/strict";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
+const sourceRoot = new URL("../", import.meta.url);
 const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
-}
-
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
-});
-
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
+test("uses the Masar CRM shell as the home page", async () => {
+  const [page, layout, packageJson] = await Promise.all([
+    readFile(new URL("app/page.tsx", sourceRoot), "utf8"),
+    readFile(new URL("app/layout.tsx", sourceRoot), "utf8"),
+    readFile(new URL("package.json", sourceRoot), "utf8"),
   ]);
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+  assert.match(page, /import\s+\{\s*CrmShell\s*\}\s+from\s+["']\.\/crm-shell["']/);
+  assert.match(page, /export const dynamic\s*=\s*["']force-dynamic["']/);
+  assert.match(page, /return\s+<CrmShell\s*\/>/);
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
+  assert.match(layout, /title:\s*["'][^"']*CRM/);
+  assert.match(layout, /<html lang=["']ar["'] dir=["']rtl["']>/);
+  assert.match(packageJson, /"name":\s*"masar-crm"/);
+  assert.doesNotMatch(layout, /codex-preview|Starter Project|_sites-preview/);
+});
 
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
+test("does not depend on the disposable starter preview", async () => {
+  const [page, packageJson, previewFiles] = await Promise.all([
+    readFile(new URL("app/page.tsx", sourceRoot), "utf8"),
+    readFile(new URL("package.json", sourceRoot), "utf8"),
+    readdir(previewRoot).catch((error) => {
+      if (error?.code === "ENOENT") return [];
+      throw error;
+    }),
+  ]);
 
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+  assert.deepEqual(previewFiles.filter((file) => file.endsWith(".tsx") || file.endsWith(".css")), []);
+  assert.doesNotMatch(page, /SkeletonPreview|_sites-preview|react-loading-skeleton/);
+  assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+});
+
+test("loads MTD data for the selected date range", async () => {
+  const [shell, setupRoute] = await Promise.all([
+    readFile(new URL("app/crm-shell.tsx", sourceRoot), "utf8"),
+    readFile(new URL("app/api/setup/route.ts", sourceRoot), "utf8"),
+  ]);
+
+  assert.match(shell, /<MtdDashboardPage data=\{data\} reload=\{reload\}/);
+  assert.doesNotMatch(shell, /<MtdDashboardPage data=\{data\} reload=\{reloadPage\}/);
+  assert.doesNotMatch(shell, /type="date" min=\{monthStart\}/);
+  assert.match(setupRoute, /page==="mtd"[\s\S]*?\.bind\(paymentFrom,paymentTo,paymentFrom,paymentTo\)/);
+  assert.match(setupRoute, /transferExcludedReportPages/);
+  assert.match(setupRoute, /transferred from another track/);
+  assert.match(setupRoute, /transferred from another student/);
+});
+
+test("provides a permission-scoped monthly employee schedule", async () => {
+  const [shell, route, setupRoute, bootstrap, migration] = await Promise.all([
+    readFile(new URL("app/crm-shell.tsx", sourceRoot), "utf8"),
+    readFile(new URL("app/api/employee-schedule/route.ts", sourceRoot), "utf8"),
+    readFile(new URL("app/api/setup/route.ts", sourceRoot), "utf8"),
+    readFile(new URL("db/bootstrap.ts", sourceRoot), "utf8"),
+    readFile(new URL("drizzle/0018_employee_schedules.sql", sourceRoot), "utf8"),
+  ]);
+
+  assert.match(shell, /label: "Employees Schedule", tab: "employeeSchedule"/);
+  assert.match(shell, /tab === "employeeSchedule"\) return <EmployeeSchedulePage/);
+  assert.match(route, /pageKey === "employeeSchedule"/);
+  assert.match(route, /dataScope/);
+  assert.match(route, /employee_id=\? AND work_date=\?/);
+  assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS employee_schedules/);
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS `employee_schedules_employee_date_idx`/);
+  assert.match(shell, /kind: "employee_leave_type"/);
+  assert.match(setupRoute, /allowedKinds=new Set\(\[[^\]]*"employee_leave_type"/);
+  assert.match(setupRoute, /allowedKinds=new Set\(\[[^\]]*"retention_nonrenewal_reason"/);
 });

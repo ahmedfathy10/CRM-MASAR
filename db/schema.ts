@@ -42,6 +42,7 @@ export const jobTitlePermissions = sqliteTable("job_title_permissions", {
   canAdd: integer("can_add", { mode: "boolean" }).notNull().default(false),
   canEdit: integer("can_edit", { mode: "boolean" }).notNull().default(false),
   canDelete: integer("can_delete", { mode: "boolean" }).notNull().default(false),
+  dataScope: text("data_scope").notNull().default("all"),
 }, (table) => [uniqueIndex("job_title_permissions_unique_idx").on(table.jobTitleId, table.pageKey)]);
 
 export const branches = sqliteTable("branches", {
@@ -99,7 +100,24 @@ export const students = sqliteTable("students", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   fullName: text("full_name").notNull(),
   mobile: text("mobile").notNull().default(""),
+  secondaryMobile: text("secondary_mobile").notNull().default(""),
+  email: text("email").notNull().default(""),
   levelId: integer("level_id").notNull().references(() => settingsEntities.id),
+  trackId: integer("track_id").references(() => tracks.id),
+  branchId: integer("branch_id").references(() => branches.id),
+  status: text("status").notNull().default("active"),
+  customData: text("custom_data").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const studentRecords = sqliteTable("student_records", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  studentId: integer("student_id").notNull().references(() => students.id),
+  kind: text("kind").notNull(),
+  recordDate: text("record_date").notNull().default(sql`CURRENT_TIMESTAMP`),
+  status: text("status").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  customData: text("custom_data").notNull().default("{}"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -135,6 +153,51 @@ export const employeeSessions = sqliteTable("employee_sessions", {
   expiresAt: text("expires_at").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("employee_sessions_token_idx").on(table.token)]);
+
+export const conversations = sqliteTable("conversations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull().default(""),
+  isGroup: integer("is_group", { mode: "boolean" }).notNull().default(false),
+  createdBy: integer("created_by").references(() => employees.id),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const conversationMembers = sqliteTable("conversation_members", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("conversation_members_unique_idx").on(table.conversationId, table.employeeId)]);
+
+export const messages = sqliteTable("messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id),
+  senderId: integer("sender_id").notNull().references(() => employees.id),
+  content: text("content").notNull().default(""),
+  contentType: text("content_type").notNull().default("text"),
+  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const notifications = sqliteTable("notifications", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  messageId: integer("message_id").references(() => messages.id),
+  type: text("type").notNull().default("message"),
+  data: text("data").notNull().default("{}"),
+  isSeen: integer("is_seen", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const pushSubscriptions = sqliteTable("push_subscriptions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  employeeId: integer("employee_id").notNull().references(() => employees.id),
+  endpoint: text("endpoint").notNull(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  raw: text("raw").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("push_subscriptions_endpoint_idx").on(table.endpoint)]);
 
 export const formDefinitions = sqliteTable("form_definitions", {
   id: integer("id").primaryKey({ autoIncrement: true }),

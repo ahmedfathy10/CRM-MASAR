@@ -30,6 +30,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -43,3 +44,21 @@ next-env.d.ts
 /work/
 /pnpm-lock.yaml
 /.pnpm-store/
+
+# Local CRM data and deployment artifacts must never be committed.
+/.deploy/
+/.codex-tmp/
+/.tmp_*/
+/.site-stage-*/
+/site-v*.tar.gz
+/backups/
+/*.log
+/*.sqlite
+/*.sqlite3
+/*.db
+
+# Local launch and diagnostic output.
+/.app-server*.log
+/.dev-server*.log
+/.local-dev*.log
+/.codex-dev.log

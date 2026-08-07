@@ -1,4 +1,4 @@
-# vinext-starter
+# Masar CRM
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
@@ -16,7 +16,38 @@ npm run dev
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Production deployment uses `wrangler.jsonc`.
+
+## Cloudflare production
+
+The application deploys as a Cloudflare Worker with a D1 database. The local
+database is not committed to source control.
+
+Initial deployment from Windows PowerShell:
+
+```powershell
+.\scripts\cloudflare-first-deploy.ps1
+```
+
+The script opens Cloudflare sign-in, creates the production D1 database, makes
+a consistent sanitized snapshot of the local CRM data, imports it, builds the
+application, deploys it, and verifies the main record counts.
+
+Future manual deployments:
+
+```bash
+npm run deploy:cloudflare
+```
+
+On Windows, double-click `Deploy-Update.cmd` to publish code updates and
+`Backup-Online-Data.cmd` to download a protected SQL backup of the live D1
+database. Code deployment never overwrites production data.
+
+For automatic updates, connect the repository to Cloudflare Workers Builds or
+add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub repository
+secrets. The included GitHub Actions workflow deploys every push to `main`.
+
+Never commit `.deploy`, `.wrangler`, database files, backups, or `.env` files.
 
 ## Included Shape
 

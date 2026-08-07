@@ -1,0 +1,35 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "masar-crm",
+	"workers_dev": true,
+	"preview_urls": false,
+	"main": "./dist/server/index.js",
+	"compatibility_date": "2026-05-15",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"no_bundle": true,
+	"rules": [
+		{
+			"type": "ESModule",
+			"globs": [
+				"**/*.js",
+				"**/*.mjs"
+			]
+		}
+	],
+	"assets": {
+		"directory": "./dist/client",
+		"binding": "ASSETS"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "masar-crm-production",
+			"database_id": "e18ef464-6888-47b9-81af-cb5f60893f2d"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}
