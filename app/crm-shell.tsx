@@ -292,6 +292,10 @@ function egyptDateTimeLocal(date = new Date()) {
     part = (type: string) => parts.find((item) => item.type === type)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
 }
+function dueFollowups(followups: Followup[]) {
+  const todayEnd = new Date(`${egyptDateKey()}T23:59:59`).getTime();
+  return followups.filter((followup) => followup.status === "pending" && new Date(followup.scheduledAt).getTime() <= todayEnd);
+}
 function formatEgyptDateTime(value: string | Date) {
   const date = systemDate(value);
   return Number.isNaN(date.getTime())
@@ -961,7 +965,7 @@ export function CrmShell() {
                 }
               }}
               badges={{
-                "Follow up Reminder": data.followups.filter((followup) => followup.status === "pending").length,
+                "Follow up Reminder": dueFollowups(scopedData.followups).length,
               }}
             />
           ))}
@@ -1318,12 +1322,13 @@ export function CrmShell() {
       {dialog === "completeFollowup" && selectedFollowup && (
         <CompleteFollowupDialog
           followup={selectedFollowup}
+          data={data}
           onClose={() => setDialog(null)}
-          onSubmit={async (outcome) => {
+          onSubmit={async (payload) => {
             await mutateSales({
               action: "completeFollowup",
               id: selectedFollowup.id,
-              outcome,
+              ...payload,
             });
             setDialog(null);
             setNotice("تم إنهاء المتابعة وحفظ نتيجتها");
@@ -25036,6 +25041,7 @@ function FollowupsPage({ data, mode, onAction }: { data: Setup; mode: "all" | "d
   const completedRows = data.followups.filter((followup) => followup.status === "completed");
   const overdue = pending.filter((followup) => new Date(followup.scheduledAt).getTime() < now).length;
   const today = pending.filter((followup) => followupDateKey(followup.scheduledAt) === todayKey).length;
+  const dueRows = dueFollowups(data.followups);
   const upcoming = pending.filter((followup) => new Date(followup.scheduledAt).getTime() >= now && followupDateKey(followup.scheduledAt) !== todayKey).length;
   const completedToday = completedRows.filter((followup) => followupDateKey(followup.completedAt || "") === todayKey).length;
   const baseRows = mode === "due" ? pending.filter((followup) => new Date(followup.scheduledAt).getTime() <= new Date(`${todayKey}T23:59:59`).getTime()) : data.followups;
@@ -25094,6 +25100,17 @@ function FollowupsPage({ data, mode, onAction }: { data: Setup; mode: "all" | "d
         <article className="overdue"><span>!</span><div><small>متأخرة</small><strong>{overdue}</strong><em>تحتاج إجراء سريع</em></div></article>
         <article className="done"><span>✓</span><div><small>مكتملة اليوم</small><strong>{completedToday}</strong><em>{completedRows.length} إجمالي مكتمل</em></div></article>
       </section>
+
+      {dueRows.length > 0 && (
+        <section className="followup-due-alert" role="status">
+          <div>
+            <b>{dueRows.length.toLocaleString("en-US")}</b>
+            <span>متابعات مستحقة الآن</span>
+          </div>
+          <p>ابدأ بالأقدم في قائمة التنفيذ، ثم احفظ نتيجة التواصل أو الموعد القادم من زر إنهاء.</p>
+          <button className="secondary" onClick={() => { setDraft((current) => ({ ...current, status: "pending", timing: "all", to: todayKey })); setFilters((current) => ({ ...current, status: "pending", timing: "all", to: todayKey })); }}>عرض المستحق</button>
+        </section>
+      )}
 
       <section className="panel followup-filter-panel">
         <div className="panel-head">
@@ -25691,8 +25708,14 @@ function FollowupDialog({ lead, data, onClose, onSubmit }: { lead: Lead; data: S
   );
 }
 
-function CompleteFollowupDialog({ followup, onClose, onSubmit }: { followup: Followup; onClose: () => void; onSubmit: (outcome: string) => Promise<void> }) {
+function CompleteFollowupDialog({ followup, data, onClose, onSubmit }: { followup: Followup; data: Setup; onClose: () => void; onSubmit: (payload: Record<string, unknown>) => Promise<void> }) {
+  const resultOptions = callResultOptions(data);
   const [outcome, setOutcome] = useState("");
+  const [result, setResult] = useState(resultOptions[0] || "");
+  const [notes, setNotes] = useState("");
+  const [nextScheduledAt, setNextScheduledAt] = useState("");
+  const [nextNotes, setNextNotes] = useState("");
+  const [nextPriority, setNextPriority] = useState(followup.priority || "normal");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(e: FormEvent) {
@@ -25700,7 +25723,7 @@ function CompleteFollowupDialog({ followup, onClose, onSubmit }: { followup: Fol
     setBusy(true);
     setError("");
     try {
-      await onSubmit(outcome);
+      await onSubmit({ outcome, result, notes, nextScheduledAt, nextNotes, nextPriority });
     } catch (err) {
       setError(err instanceof Error ? err.message : "تعذر إنهاء المتابعة");
       setBusy(false);
@@ -25729,6 +25752,35 @@ function CompleteFollowupDialog({ followup, onClose, onSubmit }: { followup: Fol
             <span>نتيجة المتابعة *</span>
             <textarea required value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="ماذا حدث؟ وما هي الخطوة التالية؟" />
           </label>
+          <label>
+            <span>نتيجة المكالمة</span>
+            <select value={result} onChange={(event) => setResult(event.target.value)}>
+              <option value="">بدون تسجيل مكالمة</option>
+              {resultOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>المتابعة القادمة</span>
+            <input type="datetime-local" value={nextScheduledAt} min={egyptDateTimeLocal()} onChange={(event) => setNextScheduledAt(event.target.value)} />
+          </label>
+          <label>
+            <span>أولوية الموعد القادم</span>
+            <select value={nextPriority} onChange={(event) => setNextPriority(event.target.value)}>
+              <option value="normal">عادية</option>
+              <option value="high">عالية</option>
+              <option value="urgent">عاجلة</option>
+            </select>
+          </label>
+          <label className="full">
+            <span>ملاحظات المكالمة</span>
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="ملاحظات الاتصال الحالي" />
+          </label>
+          {nextScheduledAt && (
+            <label className="full">
+              <span>تعليمات الموعد القادم</span>
+              <textarea value={nextNotes} onChange={(event) => setNextNotes(event.target.value)} placeholder="ما المطلوب في المتابعة القادمة؟" />
+            </label>
+          )}
         </div>
         <div className="dialog-foot">
           <button className="secondary" type="button" onClick={onClose}>
@@ -26855,5 +26907,3 @@ function FieldDialog({ onClose, onSubmit }: { onClose: () => void; onSubmit: (p:
     </BaseDialog>
   );
 }
-
-

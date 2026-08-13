@@ -287,7 +287,7 @@ export async function POST(request: Request) {
     }
     if (action === "createFollowup") {
       const leadId = Number(payload.leadId);
-      const scheduledDate = new Date(String(payload.scheduledAt ?? ""));
+      const scheduledDate = new Date(cairoWallTimeToUtc(payload.scheduledAt));
       if (!leadId || Number.isNaN(scheduledDate.getTime())) return Response.json({ error: "العميل وموعد المتابعة مطلوبان" }, { status: 400 });
       const lead = await db.prepare("SELECT id, assigned_employee_id AS assignedEmployeeId, branch_id AS branchId,status FROM leads WHERE id=?").bind(leadId).first<{ id: number; assignedEmployeeId: number | null; branchId: number | null;status:string }>();
       if (!lead) return Response.json({ error: "العميل غير موجود" }, { status: 404 });
@@ -304,18 +304,36 @@ export async function POST(request: Request) {
     }
     if (action === "completeFollowup") {
       const id = Number(payload.id);
-      const followup = await db.prepare("SELECT lead_id AS leadId FROM followups WHERE id=? AND status='pending'").bind(id).first<{ leadId: number }>();
+      const followup = await db.prepare("SELECT f.lead_id AS leadId,f.assigned_employee_id AS assignedEmployeeId,f.branch_id AS branchId,f.channel,f.priority,f.notes,l.primary_phone AS phone FROM followups f JOIN leads l ON l.id=f.lead_id WHERE f.id=? AND f.status='pending'").bind(id).first<{ leadId: number; assignedEmployeeId: number | null; branchId: number | null; channel: string; priority: string; notes: string; phone: string }>();
       if (!followup) return Response.json({ error: "المتابعة غير موجودة أو تم إنهاؤها" }, { status: 404 });
       const outcome = String(payload.outcome ?? "").trim();
       if (!outcome) return Response.json({ error: "نتيجة المتابعة مطلوبة" }, { status: 400 });
-      await db.prepare("UPDATE followups SET status='completed', outcome=?, completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(outcome, id).run();
+      const resultValue = String(payload.result || "").trim() ? await configuredCallResult(payload.result) : null;
+      if (String(payload.result || "").trim() && !resultValue) return Response.json({ error: "اختر نتيجة مكالمة متاحة من Admin Settings" }, { status: 400 });
+      const nextScheduledAt = String(payload.nextScheduledAt || "").trim();
+      const nextDate = nextScheduledAt ? new Date(cairoWallTimeToUtc(nextScheduledAt)) : null;
+      if (nextScheduledAt && (!nextDate || Number.isNaN(nextDate.getTime()))) return Response.json({ error: "موعد المتابعة القادمة غير صحيح" }, { status: 400 });
+      const priorityMap: Record<string, string> = { "عادية": "normal", "مرتفعة": "high", "عاجلة": "urgent", normal: "normal", high: "high", urgent: "urgent" };
+      const statements = [
+        db.prepare("UPDATE followups SET status='completed', outcome=?, completed_at=CURRENT_TIMESTAMP WHERE id=?").bind(outcome, id),
+      ];
+      if (resultValue) {
+        statements.push(db.prepare("INSERT INTO call_records (lead_id, phone, direction, result, assigned_employee_id, branch_id, call_at, notes, custom_data) VALUES (?, ?, 'outgoing', ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)")
+          .bind(followup.leadId, followup.phone, resultValue, actor.id || followup.assignedEmployeeId, followup.branchId, String(payload.notes || outcome), JSON.stringify({ callSource: "followup", followupId: id, step: "scheduledFollowupResult" })));
+      }
+      if (nextDate) {
+        statements.push(db.prepare("INSERT INTO followups (lead_id, assigned_employee_id, branch_id, scheduled_at, channel, priority, notes, custom_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+          .bind(followup.leadId, followup.assignedEmployeeId || actor.id || null, followup.branchId, nextDate.toISOString(), followup.channel || "call", priorityMap[String(payload.nextPriority)] || followup.priority || "normal", String(payload.nextNotes || ""), JSON.stringify({ parentFollowupId: id, createdFromOutcome: outcome })));
+      }
+      await db.batch(statements);
       const pending = await db.prepare("SELECT COUNT(*) AS count FROM followups WHERE lead_id=? AND status='pending'").bind(followup.leadId).first<{ count: number }>();
       if ((pending?.count ?? 0) === 0) await db.prepare("UPDATE leads SET status='contacted', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(followup.leadId).run();
-      return Response.json({ ok: true });
+      else await db.prepare("UPDATE leads SET status='followup', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(followup.leadId).run();
+      return Response.json({ ok: true, nextCreated: Boolean(nextDate), callRecorded: Boolean(resultValue) });
     }
     if (action === "rescheduleFollowup") {
       const id = Number(payload.id);
-      const scheduledDate = new Date(String(payload.scheduledAt ?? ""));
+      const scheduledDate = new Date(cairoWallTimeToUtc(payload.scheduledAt));
       if (!id || Number.isNaN(scheduledDate.getTime())) return Response.json({ error: "موعد جديد صحيح مطلوب" }, { status: 400 });
       await db.prepare("UPDATE followups SET scheduled_at=?, status='pending', completed_at=NULL WHERE id=?").bind(scheduledDate.toISOString(), id).run();
       return Response.json({ ok: true });
