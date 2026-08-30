@@ -1,6 +1,7 @@
 "use client";
 
-import { CSSProperties, FormEvent, Fragment, MouseEvent as ReactMouseEvent, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, Fragment, MouseEvent as ReactMouseEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ChatPanel from "./chat/ChatPanel";
 import { EmployeeSchedulePage } from "./employee-schedule-page";
 import { EmployeeProfilePage } from "./employee-profile-page";
@@ -248,7 +249,7 @@ type Setup = {
   leadDetailsFields: Field[];
   followupFields: Field[];
 };
-type Tab = "overview" | "employeeProfile" | "departments" | "jobs" | "employees" | "employeeSchedule" | "leaves" | "permissions" | "forms" | "settings" | "classes" | "tracks" | "sources" | "adminSettings" | "offers" | "paymentMethods" | "payments" | "financialReports" | "operationsRetention" | "retentionMoney" | "operationsAbsenceReports" | "operationsAbsenceCalls" | "retentionTargets" | "debtors" | "debtInstallments" | "debtReset" | "refunds" | "studentTransfers" | "trackTransfers" | "timeSystem" | "rounds" | "studyTypes" | "levels" | "batches" | "groups" | "utilization" | "groupUtilization" | "floorSchedule" | "scheduleFinal" | "setupCards" | "exams" | "oralResults" | "studentsStatus" | "marketingExpenses" | "adsSpendingTargets" | "mtd" | "leadsCallsReport" | "leadsReport" | "callsReport" | "leads" | "inboundCalls" | "leadSequence" | "followups" | "receivedFollowups" | "callCenterCalls" | "studentsList" | "studentAttendance" | "studentAbsence" | "studentPlacement" | "studentComplaints" | "studentInformations" | "studentMisplaced" | "studentReported" | "chat" | "placeholder";
+type Tab = "overview" | "employeeProfile" | "departments" | "jobs" | "employees" | "employeeSchedule" | "leaves" | "permissions" | "forms" | "settings" | "classes" | "tracks" | "sources" | "adminSettings" | "offers" | "paymentMethods" | "payments" | "financialReports" | "operationsRetention" | "retentionMoney" | "operationsAbsenceReports" | "operationsAbsenceCalls" | "retentionTargets" | "debtors" | "debtInstallments" | "debtReset" | "refunds" | "studentTransfers" | "trackTransfers" | "timeSystem" | "rounds" | "studyTypes" | "levels" | "batches" | "groups" | "utilization" | "groupUtilization" | "floorSchedule" | "scheduleFinal" | "setupCards" | "exams" | "oralResults" | "studentsStatus" | "marketingExpenses" | "adsSpendingTargets" | "mtd" | "leadsCallsReport" | "leadsReport" | "callsReport" | "leads" | "inboundCalls" | "leadSequence" | "followups" | "receivedFollowups" | "callCenterCalls" | "studentsList" | "studentMissingCalls" | "studentRemainingCalls" | "studentVisitorCalls" | "operationCalls" | "studentAttendance" | "studentAbsence" | "studentPlacement" | "studentComplaints" | "studentInformations" | "studentMisplaced" | "studentReported" | "chat" | "placeholder";
 type Dialog = "employee" | "department" | "job" | "field" | "branch" | "lead" | "call" | "leadDetails" | "callResult" | "leadHistory" | "convertStudent" | "scheduleFollowup" | "completeFollowup" | "rescheduleFollowup" | null;
 type AuthEmployee = {
   id: number;
@@ -266,8 +267,23 @@ const arabCountries = ["مصر", "السعودية", "الإمارات", "الك
 const SYSTEM_TIME_ZONE = "Africa/Cairo";
 function systemDate(value: string | Date) {
   if (value instanceof Date) return value;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(" ", "T")}Z` : value;
-  return new Date(normalized);
+  const plainDate = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!plainDate) return new Date(value);
+  const [, year, month, day, hour = "00", minute = "00", second = "00"] = plainDate;
+  const utc = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: SYSTEM_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(utc);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "0";
+  const zoneAsUtc = Date.UTC(Number(part("year")), Number(part("month")) - 1, Number(part("day")), Number(part("hour")), Number(part("minute")), Number(part("second")));
+  return new Date(utc.getTime() - (zoneAsUtc - utc.getTime()));
 }
 function egyptDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -317,9 +333,14 @@ function formatEgyptDate(value: string | Date) {
 }
 function displayCustomerPhone(value: unknown, fallback = "—") {
   let digits = String(value || "").replace(/\D/g, "");
-  digits = digits.replace(/^0020?/, "");
-  if (/^1[0125]\d{8}$/.test(digits)) digits = `0${digits}`;
-  return digits || fallback;
+  if (!digits) return fallback;
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (/^0?1[0125]\d{8}$/.test(digits)) return `0020${digits.replace(/^0/, "")}`;
+  if (/^20(?:1[0125]\d{8}|[2-9]\d{7,9})$/.test(digits)) return `00${digits}`;
+  return digits.startsWith("0") ? `0020${digits.slice(1)}` : `00${digits}`;
+}
+function phoneSearchValue(value: unknown) {
+  return displayCustomerPhone(value, "");
 }
 const egyptAreas: Record<string, string[]> = {
   القاهرة: ["مدينة نصر", "مصر الجديدة", "النزهة", "التجمع الأول", "التجمع الثالث", "التجمع الخامس", "القاهرة الجديدة", "المعادي", "زهراء المعادي", "البساتين", "دار السلام", "المقطم", "حلوان", "المعصرة", "طرة", "15 مايو", "الشروق", "بدر", "السلام", "المرج", "عين شمس", "المطرية", "الزيتون", "حدائق القبة", "الوايلي", "العباسية", "وسط البلد", "عابدين", "الأزبكية", "باب الشعرية", "السيدة زينب", "مصر القديمة", "المنيل", "الزمالك", "شبرا", "روض الفرج", "الساحل"],
@@ -380,6 +401,13 @@ const emptySetup: Setup = {
   leadDetailsFields: [],
   followupFields: [],
 };
+const SALES_PAGES = new Set<Tab>(["overview", "leads", "inboundCalls", "leadSequence", "followups", "receivedFollowups", "callCenterCalls", "mtd", "leadsCallsReport", "leadsReport", "callsReport"]);
+const PAGE_CACHE_TTL = 120_000;
+const PREFETCH_CACHE_TTL = 90_000;
+
+function tabHref(tab: Tab) {
+  return tab === "overview" ? "/" : `/?page=${encodeURIComponent(tab)}`;
+}
 const titles: Record<Tab, [string, string]> = {
   overview: ["Dashboard", "نظرة شاملة على نشاط الفروع والمبيعات وخدمة العملاء"],
   employeeProfile: ["Employee Profile", "أدائي وأرقامي وجدولي والمكافآت والخصومات"],
@@ -438,6 +466,10 @@ const titles: Record<Tab, [string, string]> = {
   followups: ["Follow up Reminder", "طلبات ومواعيد المتابعة التي يسجلها الموظفون"],
   receivedFollowups: ["Inbound Follow Up", "تسلسل متابعة العملاء القادمين من المكالمات الواردة"],
   studentsList: ["Students List", "إدارة بيانات الطلاب والبحث والتصفية والتصدير"],
+  studentMissingCalls: ["Missing Calls", "طلاب New Comers بلا جروب"],
+  studentRemainingCalls: ["Remaining Calls", "طلاب متصعدون ولديهم مستويات متبقية"],
+  studentVisitorCalls: ["Visitor Calls", "بروفايلات بلا مدفوعات أو مستويات"],
+  operationCalls: ["Operation Calls", "سجل مكالمات التشغيل الموحد"],
   studentAttendance: ["Attendance", "تسجيل حضور وتأخير وغياب الطلاب"],
   studentAbsence: ["Absence Report", "تقرير الغياب المستخرج من سجل الحضور"],
   studentPlacement: ["Placement Test", "تسجيل نتائج تحديد المستوى والتوصية بالمستوى"],
@@ -542,6 +574,10 @@ const sidebarGroups: MenuGroupDefinition[] = [
     icon: "♙",
     items: [
       { label: "Students List", tab: "studentsList" },
+      { label: "Missing Calls", tab: "studentMissingCalls" },
+      { label: "Remaining Calls", tab: "studentRemainingCalls" },
+      { label: "Visitor Calls", tab: "studentVisitorCalls" },
+      { label: "Operation Calls", tab: "operationCalls" },
       { label: "Attendance", tab: "studentAttendance" },
       { label: "Absence Report", tab: "studentAbsence" },
       { label: "Placement Test", tab: "studentPlacement" },
@@ -705,12 +741,17 @@ export function CrmShell() {
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [selectedJob, setSelectedJob] = useState<JobTitle | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
-  const [profileStudentId, setProfileStudentId] = useState<number | null>(null);
+  const [profileStudentId, setProfileStudentId] = useState<string | null>(null);
   const [plannedPage, setPlannedPage] = useState({ group: "", label: "" });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const routeReady = useRef(false);
   const pageCache = useRef(new Map<string, { data: Setup; fetchedAt: number }>());
+  const prefetching = useRef(new Set<string>());
+  const pageQueryRef = useRef(pageQuery);
+  useEffect(() => {
+    pageQueryRef.current = pageQuery;
+  }, [pageQuery]);
   const routableTabs = useMemo(
     () =>
       new Set<Tab>([
@@ -725,6 +766,30 @@ export function CrmShell() {
     if (typeof window === "undefined") return "overview" as Tab;
     const requested = new URL(window.location.href).searchParams.get("page") as Tab | null;
     return requested && routableTabs.has(requested) ? requested : "overview";
+  };
+  const studentsListQueryFromUrl = () => {
+    if (typeof window === "undefined") return {} as Record<string, string>;
+    const params = new URL(window.location.href).searchParams;
+    return Object.fromEntries(["search", "from", "to", "level", "branch", "status"].flatMap((key) => {
+      const value = params.get(key);
+      return value ? [[key, value]] : [];
+    }));
+  };
+  const syncStudentsListUrl = (query: Record<string, string> = {}, studentId?: number | null) => {
+    if (typeof window === "undefined" || !routeReady.current) return;
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("page", "studentsList");
+    if (studentId) {
+      const student = data.students.find((item) => item.id === studentId);
+      if (student?.mobile) url.searchParams.set("student", displayCustomerPhone(student.mobile, student.mobile));
+      url.searchParams.set("search", student?.mobile ? displayCustomerPhone(student.mobile, student.mobile) : String(studentId));
+    } else {
+      Object.entries(query).forEach(([key, value]) => {
+        if (value) url.searchParams.set(key, value);
+      });
+    }
+    window.history.pushState({ page: "studentsList" }, "", url);
   };
   const navigateToTab = (nextTab: Tab, options: { replace?: boolean } = {}) => {
     setMobileNavOpen(false);
@@ -753,24 +818,26 @@ export function CrmShell() {
       }
     );
   };
-  async function load(query: Record<string, string> = pageQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({ page: tab });
+  const cacheKeyFor = useCallback((targetTab: Tab, query: Record<string, string> = {}) => {
+    const params = new URLSearchParams({ page: targetTab });
     Object.entries(query).forEach(([key, value]) => {
       if (value) params.set(key, value);
     });
-    const cacheKey = params.toString();
+    return params.toString();
+  }, []);
+  const load = useCallback(async (query: Record<string, string> = pageQueryRef.current, signal?: AbortSignal, targetTab: Tab = tab, updateView = true) => {
+    const cacheKey = cacheKeyFor(targetTab, query);
     const cached = pageCache.current.get(cacheKey);
-    if (cached && Date.now() - cached.fetchedAt < 20_000) {
-      setData(cached.data);
+    if (cached && Date.now() - cached.fetchedAt < PAGE_CACHE_TTL) {
+      if (updateView) setData(cached.data);
       return;
     }
-    const salesPages = new Set<Tab>(["overview", "leads", "inboundCalls", "leadSequence", "followups", "receivedFollowups", "callCenterCalls", "studentsList", "mtd", "leadsCallsReport", "leadsReport", "callsReport"]),
-      setupRequest = fetch(`/api/setup?${params.toString()}`, {
+    const setupRequest = fetch(`/api/setup?${cacheKey}`, {
         cache: "no-store",
         signal,
       }),
-      salesRequest = salesPages.has(tab)
-        ? fetch(`/api/leads?${params.toString()}`, {
+      salesRequest = SALES_PAGES.has(targetTab)
+        ? fetch(`/api/leads?${cacheKey}`, {
             cache: "no-store",
             signal,
           })
@@ -800,11 +867,31 @@ export function CrmShell() {
     if (salesResponse && !salesResponse.ok) throw new Error(sales.error || "تعذر تحميل العملاء");
     const nextData: Setup = { ...setup, ...sales };
     pageCache.current.set(cacheKey, { data: nextData, fetchedAt: Date.now() });
-    setData(nextData);
-  }
+    if (updateView) setData(nextData);
+  }, [cacheKeyFor, tab]);
+  const prefetchPage = useCallback(
+    (targetTab: Tab) => {
+      if (!currentUser || targetTab === "employeeProfile") return;
+      const cacheKey = cacheKeyFor(targetTab, {});
+      const cached = pageCache.current.get(cacheKey);
+      if (prefetching.current.has(cacheKey) || (cached && Date.now() - cached.fetchedAt < PREFETCH_CACHE_TTL)) return;
+      const controller = new AbortController();
+      prefetching.current.add(cacheKey);
+      void load({}, controller.signal, targetTab, false)
+        .catch(() => {})
+        .finally(() => prefetching.current.delete(cacheKey));
+      return () => controller.abort();
+    },
+    [cacheKeyFor, currentUser, load],
+  );
   useEffect(() => {
     const initialTab = tabFromUrl();
     setTab(initialTab);
+    if (initialTab === "studentsList") {
+      const params = new URL(window.location.href).searchParams;
+      setProfileStudentId(params.get("student"));
+      setPageQuery(studentsListQueryFromUrl());
+    }
     routeReady.current = true;
     const currentUrl = new URL(window.location.href);
     if (currentUrl.searchParams.get("page") && initialTab === "overview") {
@@ -812,8 +899,10 @@ export function CrmShell() {
       window.history.replaceState({ page: "overview" }, "", currentUrl);
     }
     const handleHistoryNavigation = () => {
-      setPageQuery({});
-      setTab(tabFromUrl());
+      const nextTab = tabFromUrl();
+      setPageQuery(nextTab === "studentsList" ? studentsListQueryFromUrl() : {});
+      setProfileStudentId(nextTab === "studentsList" ? new URL(window.location.href).searchParams.get("student") : null);
+      setTab(nextTab);
     };
     window.addEventListener("popstate", handleHistoryNavigation);
     return () => window.removeEventListener("popstate", handleHistoryNavigation);
@@ -834,9 +923,16 @@ export function CrmShell() {
       return;
     }
     const controller = new AbortController();
-    setPageQuery({});
-    setLoading(true);
-    load({}, controller.signal)
+    const initialQuery = tab === "studentsList" ? studentsListQueryFromUrl() : {};
+    const cached = pageCache.current.get(cacheKeyFor(tab, initialQuery));
+    setPageQuery(initialQuery);
+    if (cached) {
+      setData(cached.data);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    load(initialQuery, controller.signal)
       .catch((error) => {
         if (error instanceof Error && error.name !== "AbortError") setNotice(error.message);
       })
@@ -844,19 +940,21 @@ export function CrmShell() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [currentUser, tab]);
+  }, [cacheKeyFor, currentUser, load, tab]);
   useEffect(() => {
     const openProfile = (event: Event) => {
       const studentId = Number((event as CustomEvent<{ studentId: number | string }>).detail?.studentId);
       if (!studentId) return;
       setDialog(null);
-      setProfileStudentId(studentId);
+      setProfileStudentId(String(studentId));
       setSelectedGroup(null);
-      navigateToTab("studentsList");
+      setTab("studentsList");
+      void load({ search: String(studentId), from: "0000-01-01", to: "9999-12-31" });
+      syncStudentsListUrl(studentsListQueryFromUrl(), studentId);
     };
     window.addEventListener("open-student-profile", openProfile);
     return () => window.removeEventListener("open-student-profile", openProfile);
-  }, []);
+  }, [data.students]);
   useEffect(() => {
     if (!currentUser || loading || permissionFor(tab).canView) return;
     const first = (["overview", ...sidebarGroups.flatMap((group) => group.items.map((item) => item.tab).filter(Boolean))] as Tab[]).find((page) => Boolean(permissionFor(page).canView));
@@ -946,7 +1044,7 @@ export function CrmShell() {
           </div>
         </div>
         <nav aria-label="التنقل الرئيسي">
-          {permissionFor("overview").canView && <NavItem active={tab === "overview"} icon="▦" label="Dashboard" onClick={() => navigateToTab("overview")} />}
+          {permissionFor("overview").canView && <NavItem active={tab === "overview"} icon="▦" label="Dashboard" href={tabHref("overview")} onClick={() => navigateToTab("overview")} onPrefetch={() => prefetchPage("overview")} />}
           <div className="nav-separator" />
           {visibleSidebarGroups.map((group) => (
             <MenuGroup
@@ -964,20 +1062,15 @@ export function CrmShell() {
                   navigateToTab("placeholder");
                 }
               }}
+              onPrefetch={(entry) => {
+                if (entry.tab) prefetchPage(entry.tab);
+              }}
               badges={{
                 "Follow up Reminder": dueFollowups(scopedData.followups).length,
               }}
             />
           ))}
         </nav>
-        <div className="phase-card">
-          <span>المرحلة الحالية</span>
-          <strong>03 — المتابعات</strong>
-          <div className="progress phase-three">
-            <i />
-          </div>
-          <small>جدولة المواعيد، تنبيه المستحق وحفظ النتيجة</small>
-        </div>
         <div className={`profile ${userMenuOpen ? "menu-open" : ""}`}>
           <span className="avatar">{initials(currentUser.fullName)}</span>
           <button type="button" className="profile-trigger" onClick={() => setUserMenuOpen((value) => !value)} aria-expanded={userMenuOpen}>
@@ -1081,7 +1174,13 @@ export function CrmShell() {
               selectedGroup={selectedGroup}
               selectGroup={setSelectedGroup}
               profileStudentId={profileStudentId}
-              closeStudentProfile={() => setProfileStudentId(null)}
+              closeStudentProfile={() => {
+                setProfileStudentId(null);
+                syncStudentsListUrl(pageQuery);
+              }}
+              studentListQuery={pageQuery}
+              openStudentProfile={(studentId) => syncStudentsListUrl(pageQuery, studentId)}
+              syncStudentListFilters={syncStudentsListUrl}
               editDepartment={(department) => {
                 setSelectedDepartment(department);
                 setDialog("department");
@@ -1607,7 +1706,7 @@ function DataImportButton({kind,label}:{kind:"students"|"payments"|"absence"|"le
     if(!confirm(`سيتم إضافة بيانات ${file.name} إلى البيانات الحالية بدون حذف القديم. الصفوف المكررة لن تُضاف مرة أخرى. هل تريد المتابعة؟`))return;
     setBusy(true);try{
       let files=[file];
-      if(kind==="callCenter"&&file.size>900_000){const XLSX=await import("xlsx"),book=XLSX.read(await file.arrayBuffer(),{type:"array"}),sheet=book.Sheets[book.SheetNames[0]],rows=XLSX.utils.sheet_to_json<unknown[]>(sheet,{header:1,defval:""}),header=rows[0]||[];files=[];for(let index=1;index<rows.length;index+=300){const chunk=XLSX.utils.aoa_to_sheet([header,...rows.slice(index,index+300)]),chunkBook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(chunkBook,chunk,"Worksheet");files.push(new File([XLSX.write(chunkBook,{type:"array",bookType:"xlsx"})],`${file.name.replace(/\.xlsx?$/i,"")}-${Math.ceil(index/300)}.xlsx`,{type:file.type}))}}
+      if(kind==="groupStudents"||(kind==="callCenter"&&file.size>900_000)){const chunkSize=kind==="groupStudents"?150:300,XLSX=await import("xlsx"),book=XLSX.read(await file.arrayBuffer(),{type:"array"}),sheet=book.Sheets[book.SheetNames[0]],rows=XLSX.utils.sheet_to_json<unknown[]>(sheet,{header:1,defval:""}),header=rows[0]||[];if(rows.length>chunkSize+1){files=[];for(let index=1;index<rows.length;index+=chunkSize){const chunk=XLSX.utils.aoa_to_sheet([header,...rows.slice(index,index+chunkSize)]),chunkBook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(chunkBook,chunk,"Worksheet");files.push(new File([XLSX.write(chunkBook,{type:"array",bookType:"xlsx"})],`${file.name.replace(/\.xlsx?$/i,"")}-${Math.ceil(index/chunkSize)}.xlsx`,{type:file.type}))}}}
       const totals={created:0,updated:0,skipped:0,invalid:0};for(const part of files){const body=new FormData();body.set("kind",kind);body.set("file",part);const response=await fetch("/api/data-import/",{method:"POST",body}),text=await response.text();let result:Record<string,unknown>={};try{result=text?JSON.parse(text):{}}catch{throw new Error(`تعذر قراءة نتيجة الرفع (HTTP ${response.status})`)}if(!response.ok)throw new Error(String(result.error||"تعذر رفع الملف"));totals.created+=Number(result.created||0);totals.updated+=Number(result.updated||0);totals.skipped+=Number(result.skipped||0);totals.invalid+=Number(result.invalid||0)}alert(`تم الاستيراد بنجاح\nالمضاف: ${totals.created.toLocaleString()}\nالمحدّث: ${totals.updated.toLocaleString()}\nالموجود مسبقًا: ${totals.skipped.toLocaleString()}\nغير قابل للربط: ${totals.invalid.toLocaleString()}`);location.reload()
     }catch(error){alert(error instanceof Error?error.message:"تعذر رفع الملف")}finally{setBusy(false);if(input.current)input.current.value=""}}
   return <div className="page-import-bar"><input ref={input} hidden type="file" accept=".xlsx,.xls" onChange={event=>{const file=event.target.files?.[0];if(file)void upload(file)}}/><button className="primary" disabled={busy} onClick={()=>input.current?.click()}><span>⇧</span>{busy?"جارٍ الرفع...":`رفع ${label}`}</button></div>
@@ -1621,7 +1720,7 @@ function GroupsImportActions() {
     </div>
   );
 }
-function Page({ tab, data, currentUser, plannedPage, mutate, reload, open, setNotice, selectedGroup, selectGroup, profileStudentId, closeStudentProfile, editDepartment, editJob, editEmployee, addBranch, selectLead, selectFollowup, editBranch }: { tab: Tab; data: Setup; currentUser: AuthEmployee; plannedPage: { group: string; label: string }; mutate: (p: Record<string, unknown>) => Promise<void>; reload: (query: Record<string, string>) => Promise<void>; open: (d: Dialog) => void; setNotice: (s: string) => void; selectedGroup: SettingsEntity | null; selectGroup: (group: SettingsEntity | null) => void; profileStudentId: number | null; closeStudentProfile: () => void; editDepartment: (department: Department) => void; editJob: (job: JobTitle) => void; editEmployee: (employee: Employee) => void; addBranch: () => void; selectLead: (lead: Lead, dialog: Dialog) => void; selectFollowup: (followup: Followup, dialog: Dialog) => void; editBranch: (branch: Branch) => void }) {
+function Page({ tab, data, currentUser, plannedPage, mutate, reload, open, setNotice, selectedGroup, selectGroup, profileStudentId, closeStudentProfile, studentListQuery, openStudentProfile, syncStudentListFilters, editDepartment, editJob, editEmployee, addBranch, selectLead, selectFollowup, editBranch }: { tab: Tab; data: Setup; currentUser: AuthEmployee; plannedPage: { group: string; label: string }; mutate: (p: Record<string, unknown>) => Promise<void>; reload: (query: Record<string, string>) => Promise<void>; open: (d: Dialog) => void; setNotice: (s: string) => void; selectedGroup: SettingsEntity | null; selectGroup: (group: SettingsEntity | null) => void; profileStudentId: string | null; closeStudentProfile: () => void; studentListQuery: Record<string, string>; openStudentProfile: (studentId: number) => void; syncStudentListFilters: (query: Record<string, string>, studentId?: number | null) => void; editDepartment: (department: Department) => void; editJob: (job: JobTitle) => void; editEmployee: (employee: Employee) => void; addBranch: () => void; selectLead: (lead: Lead, dialog: Dialog) => void; selectFollowup: (followup: Followup, dialog: Dialog) => void; editBranch: (branch: Branch) => void }) {
   if (tab === "overview") return <DashboardPage data={data} go={open} reload={reload} />;
   if (tab === "employeeProfile") return <EmployeeProfilePage />;
   if (tab === "departments") return <Departments data={data} add={() => open("department")} edit={editDepartment} mutate={mutate} setNotice={setNotice} />;
@@ -1718,30 +1817,57 @@ function Page({ tab, data, currentUser, plannedPage, mutate, reload, open, setNo
   if (tab === "chat") return <ChatPanel />;
   if (tab === "receivedFollowups") return <InboundSequencePage data={data} />;
   if (tab === "callCenterCalls") return <><DataImportButton kind="callCenter" label="ملف Call Center"/><CallsPage data={data} add={() => open("call")} mode="all" /></>;
-  if (["studentsList", "studentAttendance", "studentAbsence", "studentPlacement", "studentComplaints", "studentInformations", "studentMisplaced", "studentReported"].includes(tab)) return <>{tab==="studentsList"&&<DataImportButton kind="students" label="ملف الطلاب"/>}<StudentsModulePage view={tab as StudentView} data={data} currentUser={currentUser} mutate={mutate} setNotice={setNotice} initialProfileStudentId={profileStudentId} onProfileClose={closeStudentProfile} /></>;
+  if (["studentsList", "studentAttendance", "studentAbsence", "studentPlacement", "studentComplaints", "studentInformations", "studentMisplaced", "studentReported"].includes(tab)) return <>{tab==="studentsList"&&<DataImportButton kind="students" label="ملف الطلاب"/>}<StudentsModulePage view={tab as StudentView} data={data} currentUser={currentUser} mutate={mutate} reload={reload} setNotice={setNotice} initialProfileStudentId={profileStudentId} onProfileOpen={openStudentProfile} onProfileClose={closeStudentProfile} initialStudentFilters={studentListQuery} onStudentFiltersChange={(filters) => { setPageQuery(filters); syncStudentListFilters(filters); }} /></>;
+  if (["studentMissingCalls", "studentRemainingCalls", "studentVisitorCalls"].includes(tab)) return <StudentCallTasksPage mode={tab === "studentMissingCalls" ? "missing" : tab === "studentRemainingCalls" ? "remaining" : "visitor"} data={data} mutate={mutate} setNotice={setNotice} />;
+  if (tab === "operationCalls") return <OperationCallsPage data={data} />;
   if (tab === "placeholder") return <PlannedPage group={plannedPage.group} label={plannedPage.label} />;
   return <FormBuilder fields={data.fields} data={data} mutate={mutate} onAdd={() => open("field")} />;
 }
 
-function SubNav({ label, active = false, disabled = false, badge, onClick }: { label: string; active?: boolean; disabled?: boolean; badge?: string; onClick?: () => void }) {
+function isPlainLeftClick(event: ReactMouseEvent<HTMLElement>) {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+function SubNav({ label, active = false, disabled = false, badge, href = "#", onClick, onPrefetch }: { label: string; active?: boolean; disabled?: boolean; badge?: string; href?: string; onClick?: () => void; onPrefetch?: () => void }) {
   return (
-    <button className={`${active ? "active" : ""} ${disabled ? "disabled" : ""}`} onClick={onClick} disabled={disabled}>
+    <a
+      className={`${active ? "active" : ""} ${disabled ? "disabled" : ""}`}
+      href={disabled ? undefined : href}
+      aria-disabled={disabled || undefined}
+      onClick={(event) => {
+        if (disabled || !isPlainLeftClick(event)) return;
+        event.preventDefault();
+        onClick?.();
+      }}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
+    >
       <i />
       <span>{label}</span>
       {badge && <em>{badge}</em>}
-    </button>
+    </a>
   );
 }
-function NavItem({ active, disabled, icon, label, badge, onClick }: { active?: boolean; disabled?: boolean; icon: string; label: string; badge?: string; onClick?: () => void }) {
+function NavItem({ active, disabled, icon, label, badge, href = "#", onClick, onPrefetch }: { active?: boolean; disabled?: boolean; icon: string; label: string; badge?: string; href?: string; onClick?: () => void; onPrefetch?: () => void }) {
   return (
-    <button className={`nav-item ${active ? "active" : ""} ${disabled ? "disabled" : ""}`} onClick={onClick} disabled={disabled}>
+    <a
+      className={`nav-item ${active ? "active" : ""} ${disabled ? "disabled" : ""}`}
+      href={disabled ? undefined : href}
+      aria-disabled={disabled || undefined}
+      onClick={(event) => {
+        if (disabled || !isPlainLeftClick(event)) return;
+        event.preventDefault();
+        onClick?.();
+      }}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
+    >
       <span className="nav-icon">{icon}</span>
       <span>{label}</span>
       {badge && <em>{badge}</em>}
-    </button>
+    </a>
   );
 }
-function MenuGroup({ group, tab, plannedPage, onSelect, badges }: { group: MenuGroupDefinition; tab: Tab; plannedPage: { group: string; label: string }; onSelect: (entry: MenuEntry) => void; badges: Record<string, number> }) {
+function MenuGroup({ group, tab, plannedPage, onSelect, onPrefetch, badges }: { group: MenuGroupDefinition; tab: Tab; plannedPage: { group: string; label: string }; onSelect: (entry: MenuEntry) => void; onPrefetch?: (entry: MenuEntry) => void; badges: Record<string, number> }) {
   const containsActive = group.items.some((item) => item.tab === tab) || (tab === "placeholder" && plannedPage.group === group.label);
   const [open, setOpen] = useState(group.label === "Customer Care" || group.label === "Employees Manager" || containsActive);
   useEffect(() => {
@@ -1760,7 +1886,7 @@ function MenuGroup({ group, tab, plannedPage, onSelect, badges }: { group: MenuG
       {open && (
         <div className="subnav erp-subnav">
           {group.items.map((entry) => (
-            <SubNav key={entry.label} label={entry.label} active={entry.tab ? tab === entry.tab : tab === "placeholder" && plannedPage.group === group.label && plannedPage.label === entry.label} badge={badges[entry.label] ? String(badges[entry.label]) : undefined} onClick={() => onSelect(entry)} />
+            <SubNav key={entry.label} label={entry.label} href={entry.tab ? tabHref(entry.tab) : tabHref("placeholder")} active={entry.tab ? tab === entry.tab : tab === "placeholder" && plannedPage.group === group.label && plannedPage.label === entry.label} badge={badges[entry.label] ? String(badges[entry.label]) : undefined} onClick={() => onSelect(entry)} onPrefetch={() => onPrefetch?.(entry)} />
           ))}
         </div>
       )}
@@ -2040,7 +2166,7 @@ function DashboardPage({ data, go, reload }: { data: Setup; go: (d: Dialog) => v
       .map((record) => ({ record, detail: safe(record.customData) }))
       .filter(({ record, detail }) => record.status !== "Voided" && !detail.voided),
     offers = new Map(data.settingsEntities.filter((item) => item.kind === "offer").map((item) => [item.id, safe(item.customData)])),
-    levels = (detail: Record<string, unknown>) => Math.max(0, Number(detail.levels ?? offers.get(Number(detail.offerId))?.levels ?? 0) - Number(detail.refundedLevels || 0)),
+    levels = (detail: Record<string, unknown>) => Math.max(0, Number(detail.levels ?? offers.get(Number(detail.offerId))?.levels ?? 0) - Number(detail.refundedLevels || 0) - Number(detail.transferredLevels || 0)),
     qualifyingMains = allPayments
       .filter(({ detail }) => Boolean(detail.isMainPayment) && levels(detail) >= 1)
       .sort((a, b) => a.record.recordDate.localeCompare(b.record.recordDate) || a.record.id - b.record.id),
@@ -2269,14 +2395,13 @@ function DashboardPage({ data, go, reload }: { data: Setup; go: (d: Dialog) => v
           <DashboardModernMetric label="Net Amount" value={money(netAmount)} hint="Income − refunds − expenses" icon="=" tone="navy" />
         </div>
         <div className="executive-chart-grid revenue">
-          <article className="executive-chart-card">
+          <article className="executive-chart-card income-by-type-card">
             <DashboardChartTitle title="Income by Type" subtitle="Payment type share of total income" />
             <div className="executive-horizontal-bars">
               {incomeByType.length ? incomeByType.slice(0, 8).map((item, index) => (
-                <div key={item.label} title={`${item.label}: ${money(item.value)} · ${percent(totalIncome ? (item.value * 100) / totalIncome : 0)}`}>
-                  <span>{item.label}</span>
-                  <div><i style={{ width: `${(item.value / maxIncomeType) * 100}%`, background: pieColors[index % pieColors.length] }} /></div>
-                  <b>{money(item.value)}</b>
+                <div className="income-type-bar" key={item.label} title={`${item.label}: ${money(item.value)} · ${percent(totalIncome ? (item.value * 100) / totalIncome : 0)}`}>
+                  <div className="income-type-bar-head"><span>{item.label}</span><b>{money(item.value)}</b></div>
+                  <div className="income-type-bar-track"><i style={{ width: `${(item.value / maxIncomeType) * 100}%`, background: pieColors[index % pieColors.length] }} /></div>
                 </div>
               )) : <DashboardEmpty />}
             </div>
@@ -2414,10 +2539,6 @@ function DashboardPage({ data, go, reload }: { data: Setup; go: (d: Dialog) => v
         </div>
       </DashboardModernSection>
 
-      <div className="executive-quick-actions">
-        <button onClick={() => go("lead")}>＋ New Lead</button>
-        <button onClick={() => go("call")}>☎ New Call</button>
-      </div>
     </div>
   );
 }
@@ -4291,7 +4412,7 @@ function OfficeHoursManager({ data, mutate, setNotice }: { data: Setup; mutate: 
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {visibleRows.map((row) => {
                 const detail = parse(row),
                   teacher = data.employees.find((item) => item.id === Number(detail.teacherId)),
                   batch = entity("education_batch", detail.batchId),
@@ -4658,7 +4779,7 @@ function GroupsLegacy({ data, mutate, setNotice, selectedGroup, selectGroup }: {
           if (!payment.isMainPayment || payment.voided) return summary;
           const offer = data.settingsEntities.find((item) => item.kind === "offer" && item.id === Number(payment.offerId)),
             offerDetails = offer ? info(offer) : {};
-          summary.levels += Math.max(0, Number(payment.levels ?? offerDetails.levels ?? 0) - Number(payment.refundedLevels || 0));
+          summary.levels += Math.max(0, Number(payment.levels ?? offerDetails.levels ?? 0) - Number(payment.refundedLevels || 0) - Number(payment.transferredLevels || 0));
           summary.debt += Math.max(0, Number(payment.due || 0));
           return summary;
         },
@@ -6702,6 +6823,16 @@ function AdminSettingsPage({ data, mutate, setNotice }: { data: Setup; mutate: (
       hint: "تظهر في تسجيل نتيجة المكالمة ونتائج الـ Follow Up",
     },
     {
+      kind: "student_call_reason",
+      label: "Student Call Reasons",
+      hint: "Reasons used in Missing, Remaining, and Visitor Calls",
+    },
+    {
+      kind: "visitor_call_reason",
+      label: "Visitor Call Reasons",
+      hint: "Reasons used only in the Visitor Calls follow-up workflow",
+    },
+    {
       kind: "retention_nonrenewal_reason",
       label: "أسباب عدم التجديد",
       hint: "تظهر في نموذج متابعة طلاب Retention داخل Operations Reports",
@@ -6738,7 +6869,8 @@ function AdminSettingsPage({ data, mutate, setNotice }: { data: Setup; mutate: (
     },
   ];
   const [reasonDialog, setReasonDialog] = useState<SettingsEntity | null | undefined>(undefined),
-    [complaintDialog, setComplaintDialog] = useState<SettingsEntity | null | undefined>(undefined);
+    [complaintDialog, setComplaintDialog] = useState<SettingsEntity | null | undefined>(undefined),
+    [timeZoneSaving, setTimeZoneSaving] = useState(false);
   const settingDetails = (item: SettingsEntity) => {
     try {
       return JSON.parse(item.customData || "{}") as Record<string, unknown>;
@@ -6746,6 +6878,19 @@ function AdminSettingsPage({ data, mutate, setNotice }: { data: Setup; mutate: (
       return {};
     }
   };
+  const timeZoneSetting = data.settingsEntities.find((item) => item.kind === "system_setting" && item.title === "system_timezone"),
+    timeZone = String(settingDetails(timeZoneSetting || { customData: "{}" } as SettingsEntity).timeZone || "Africa/Cairo");
+  async function saveTimeZone(nextTimeZone: string) {
+    setTimeZoneSaving(true);
+    try {
+      await mutate({ action: timeZoneSetting ? "updateSettingsEntity" : "createSettingsEntity", kind: "system_setting", id: timeZoneSetting?.id, title: "system_timezone", isActive: true, customData: { timeZone: nextTimeZone } });
+      setNotice("تم حفظ توقيت النظام");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "تعذر حفظ توقيت النظام");
+    } finally {
+      setTimeZoneSaving(false);
+    }
+  }
   async function add(kind: string, label: string) {
     const title = window.prompt(`أدخل اسم ${label}`);
     if (!title?.trim()) return;
@@ -6782,6 +6927,20 @@ function AdminSettingsPage({ data, mutate, setNotice }: { data: Setup; mutate: (
   }
   return (
     <>
+      <section className="panel admin-timezone-setting">
+        <div className="panel-head">
+          <div>
+            <h2>System Time Zone</h2>
+            <p>يُستخدم لضبط وقت وتاريخ النظام وملفات الاستيراد الجديدة.</p>
+          </div>
+          <select value={timeZone} disabled={timeZoneSaving} onChange={(event) => void saveTimeZone(event.target.value)}>
+            <option value="Africa/Cairo">Africa/Cairo (Egypt)</option>
+            <option value="Asia/Riyadh">Asia/Riyadh (Saudi Arabia)</option>
+            <option value="Asia/Dubai">Asia/Dubai (UAE)</option>
+            <option value="UTC">UTC</option>
+          </select>
+        </div>
+      </section>
       <div className="admin-settings-grid">
         {sections.map((section) => {
           const rows = data.settingsEntities.filter((item) => item.kind === section.kind),
@@ -7261,6 +7420,24 @@ function PaymentMethodsPage({ data, mutate, setNotice }: { data: Setup; mutate: 
             </tbody>
           </table>
         </div>
+        {rows.length > tablePageSize && (
+          <nav className="global-table-pagination" aria-label="Student call pages">
+            <span>
+              عرض {(currentTablePage - 1) * tablePageSize + 1}-{Math.min(currentTablePage * tablePageSize, rows.length)} من {rows.length.toLocaleString("en-US")}
+            </span>
+            <div>
+              <button type="button" disabled={currentTablePage === 1} onClick={() => setTablePage((page) => Math.max(1, page - 1))}>
+                السابق
+              </button>
+              <button type="button" className="active" aria-current="page">
+                {currentTablePage}
+              </button>
+              <button type="button" disabled={currentTablePage === tablePageCount} onClick={() => setTablePage((page) => Math.min(tablePageCount, page + 1))}>
+                التالي
+              </button>
+            </div>
+          </nav>
+        )}
         {!rows.length && (
           <div className="empty">
             <span>◇</span>
@@ -7436,7 +7613,8 @@ function PaymentsPage({ data, mutate, reload, setNotice }: { data: Setup; mutate
           className="payment-filters marketing-professional-filter"
           onSubmit={(event) => {
             event.preventDefault();
-            const next = { ...draft };
+            const next = draft.query.trim() ? { ...draft, from: "", to: "" } : { ...draft };
+            if (next !== draft) setDraft(next);
             setApplied(next);
             void reload(next);
           }}
@@ -7557,6 +7735,7 @@ function PaymentsPage({ data, mutate, reload, setNotice }: { data: Setup; mutate
                   <th>Main</th>
                   <th>Invoice</th>
                   <th>Student</th>
+                  <th>Mobile</th>
                   <th>Student Location</th>
                   <th>Offer</th>
                   <th>Payment Type</th>
@@ -7575,7 +7754,7 @@ function PaymentsPage({ data, mutate, reload, setNotice }: { data: Setup; mutate
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ record, item, studentBranch, employeeBranch, paymentType }, index) => {
+                {rows.map(({ record, item, student, studentBranch, employeeBranch, paymentType }, index) => {
                   const installments = Array.isArray(item.installments)
                     ? (item.installments as Array<{
                         number: number;
@@ -7594,6 +7773,7 @@ function PaymentsPage({ data, mutate, reload, setNotice }: { data: Setup; mutate
                         <strong>{String(item.invoice || "—")}</strong>
                       </td>
                       <td>{record.studentName}</td>
+                      <td>{student ? <StudentPhoneLink studentId={student.id} phone={student.mobile} /> : "â€”"}</td>
                       <td>{studentBranch}</td>
                       <td>{String(item.offer || "—")}</td>
                       <td>
@@ -7673,7 +7853,7 @@ function FinancialReportsPage({ data, reload }: { data: Setup; reload: (query: R
         const item = details(record),
           student = studentById.get(record.studentId),
           employee = employeeById.get(Number(item.addedById)) || employeeByName.get(String(item.addedBy || "")),
-          studentBranch = String(item.studentBranch || student?.branchName || "—"),
+          studentBranch = String(student?.branchName || "—"),
           employeeBranch = String(item.employeeBranch || employee?.branchName || "—"),
           paymentType = paymentTypeLabel(record, data),
           date = egyptDateKey(systemDate(record.recordDate)),
@@ -9003,8 +9183,8 @@ function PaymentTransfersPage({ type, data }: { type: "student" | "track"; data:
   const exportRows = () =>
     downloadFinancialCsv(
       `${type}-transfers.csv`,
-      ["Payment Type", "Main", "Invoice", "From Student", "From Mobile", "To Student", "To Mobile", "From Track", "To Track", "Amount", "Reason", "Created By", "Date"],
-      rows.map(({ record, item, date }) => [String(item.paymentType || title), String(item.main || ""), String(item.invoice || ""), record.studentName, String(item.sourceMobile || ""), String(item.targetStudentName || ""), String(item.targetMobile || ""), String(item.sourceTrackName || ""), String(item.targetTrackName || ""), Number(item.amount || 0), String(item.reason || ""), String(item.createdByName || "System"), date]),
+      ["Payment Type", "Main", "Invoice", "From Student", "From Mobile", "To Student", "To Mobile", "From Track", "To Track", "Amount", "Settlement", "Reason", "Created By", "Date"],
+      rows.map(({ record, item, date }) => [String(item.paymentType || title), String(item.main || ""), String(item.invoice || ""), record.studentName, String(item.sourceMobile || ""), String(item.targetStudentName || ""), String(item.targetMobile || ""), String(item.sourceTrackName || ""), String(item.targetTrackName || ""), Number(item.amount || 0), `${Number(item.levels || 0)} Levels · ${Array.isArray(item.removedGroupIds) ? item.removedGroupIds.length : 0} Groups`, String(item.reason || ""), String(item.createdByName || "System"), date]),
     );
   return (
     <div className="content-stack payments-page">
@@ -9065,6 +9245,7 @@ function PaymentTransfersPage({ type, data }: { type: "student" | "track"; data:
                   <th>From Track</th>
                   <th>To Track</th>
                   <th>Amount</th>
+                  <th>Settlement</th>
                   <th>Reason</th>
                   <th>Created By</th>
                   <th>Date</th>
@@ -9090,6 +9271,7 @@ function PaymentTransfersPage({ type, data }: { type: "student" | "track"; data:
                     <td>
                       <strong>{Number(item.amount || 0).toLocaleString()} EGP</strong>
                     </td>
+                    <td>{Number(item.levels || 0)} Levels · {Array.isArray(item.removedGroupIds) ? item.removedGroupIds.length : 0} Groups</td>
                     <td>{String(item.reason || "—")}</td>
                     <td>{String(item.createdByName || "System")}</td>
                     <td>{formatEgyptDateTime(record.recordDate)}</td>
@@ -10325,6 +10507,10 @@ const privilegePages = [
     section: "Marketing & Sales Reports",
   },
   { key: "studentsList", label: "Students List", section: "Students" },
+  { key: "studentMissingCalls", label: "Missing Calls", section: "Students" },
+  { key: "studentRemainingCalls", label: "Remaining Calls", section: "Students" },
+  { key: "studentVisitorCalls", label: "Visitor Calls", section: "Students" },
+  { key: "operationCalls", label: "Operation Calls", section: "Students" },
   { key: "studentAttendance", label: "Attendance", section: "Students" },
   {
     key: "studentAttendanceSession",
@@ -10737,6 +10923,18 @@ function LeadsPage({ data, addLead, onAction }: { data: Setup; addLead: () => vo
     source: "",
     result: "",
   });
+  const paidNewComerPhones = useMemo(() => {
+    const paid = new Set<string>();
+    for (const record of data.studentRecords) {
+      if (record.kind !== "payment") continue;
+      const payment = studentRecordDetails(record);
+      if (payment.voided || !payment.isMainPayment || Number(payment.levels || 0) - Number(payment.refundedLevels || 0) - Number(payment.transferredLevels || 0) < 1 || !paymentTypeLabel(record, data).toLowerCase().includes("new comer") || Number(payment.netPaid ?? payment.paid ?? 0) <= 0) continue;
+      const student = data.students.find((item) => item.id === record.studentId);
+      if (!student) continue;
+      [student.mobile, student.secondaryMobile, String(studentDetails(student).fbMobile || "")].map(phoneSearchValue).filter(Boolean).forEach((phone) => paid.add(phone));
+    }
+    return paid;
+  }, [data]);
   const applyFilters = () =>
     setAppliedFilters({
       query,
@@ -10871,7 +11069,8 @@ function LeadsPage({ data, addLead, onAction }: { data: Setup; addLead: () => vo
             <tbody>
               {filtered.map((lead, index) => {
                 const sourceItem = data.settingsEntities.find((item) => item.kind === "source" && item.title === lead.source);
-                const finalStatus = lead.finalStatus || "Not Yet",
+                const isPaid = [lead.primaryPhone, lead.secondaryPhone].map(phoneSearchValue).some((phone) => phone && paidNewComerPhones.has(phone)),
+                  finalStatus = isPaid ? "Paid" : lead.finalStatus || "Not Yet",
                   historicalStatus = ["Registered Before", "Old Student", "Old Call"].includes(finalStatus),
                   convertedProfile = finalStatus === "Registered" || finalStatus === "Paid";
                 return (
@@ -11092,16 +11291,49 @@ function ReceivedCallsPageV2({ data, add }: { data: Setup; add: () => void }) {
       const details = detailsFor(call);
       const date = new Date(call.callAt).toISOString().slice(0, 10);
       const callSource = String(details.source || lead?.source || "");
-      const searchable = [details.fullName, call.leadName, call.phone, details.secondaryPhone].join(" ").toLowerCase();
-      return searchable.includes(query.toLowerCase()) && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo) && (!branch || String(call.branchId) === branch) && (!source || callSource === source);
+      const searchable = [
+        details.fullName,
+        call.leadName,
+        call.phone,
+        details.secondaryPhone,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return (
+        searchable.includes(query.toLowerCase()) &&
+        (!dateFrom || date >= dateFrom) &&
+        (!dateTo || date <= dateTo) &&
+        (!branch || String(call.branchId) === branch) &&
+        (!source || callSource === source)
+      );
     });
   return (
     <div className="content-stack received-calls">
       <section className="metrics">
-        <Metric label="المكالمات الواردة" value={calls.length} hint="ضمن الفلاتر الحالية" tone="green" />
-        <Metric label="مرتبطة بـLead" value={calls.filter((call) => call.leadId).length} hint="عملاء مسجلون" tone="blue" />
-        <Metric label="أرقام جديدة" value={calls.filter((call) => !call.leadId).length} hint="تحتاج تسجيل Lead" tone="orange" />
-        <Metric label="تم الرد" value={calls.filter((call) => call.result === "answered").length} hint="مكالمات مكتملة" tone="purple" />
+        <Metric
+          label="المكالمات الواردة"
+          value={calls.length}
+          hint="ضمن الفلاتر الحالية"
+          tone="green"
+        />
+        <Metric
+          label="مرتبطة بـLead"
+          value={calls.filter((call) => call.leadId).length}
+          hint="عملاء مسجلون"
+          tone="blue"
+        />
+        <Metric
+          label="أرقام جديدة"
+          value={calls.filter((call) => !call.leadId).length}
+          hint="تحتاج تسجيل Lead"
+          tone="orange"
+        />
+        <Metric
+          label="تم الرد"
+          value={calls.filter((call) => call.result === "answered").length}
+          hint="مكالمات مكتملة"
+          tone="purple"
+        />
       </section>
       <section className="panel">
         <div className="panel-head">
@@ -11119,17 +11351,32 @@ function ReceivedCallsPageV2({ data, add }: { data: Setup; add: () => void }) {
         <div className="lead-filters">
           <label className="search">
             <span>⌕</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="ابحث بالاسم أو الموبايل..."
+            />
           </label>
           <label>
             <span>من</span>
-            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+            />
           </label>
           <label>
             <span>إلى</span>
-            <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+            />
           </label>
-          <select value={branch} onChange={(event) => setBranch(event.target.value)}>
+          <select
+            value={branch}
+            onChange={(event) => setBranch(event.target.value)}
+          >
             <option value="">كل الفروع</option>
             {data.branches.map((item) => (
               <option key={item.id} value={item.id}>
@@ -11137,7 +11384,10 @@ function ReceivedCallsPageV2({ data, add }: { data: Setup; add: () => void }) {
               </option>
             ))}
           </select>
-          <select value={source} onChange={(event) => setSource(event.target.value)}>
+          <select
+            value={source}
+            onChange={(event) => setSource(event.target.value)}
+          >
             <option value="">كل المصادر</option>
             {data.settingsEntities
               .filter((item) => item.kind === "source")
@@ -11170,23 +11420,41 @@ function ReceivedCallsPageV2({ data, add }: { data: Setup; add: () => void }) {
                 const lead = data.leads.find((item) => item.id === call.leadId);
                 const details = detailsFor(call);
                 const callSource = String(details.source || lead?.source || "");
-                const sourceItem = data.settingsEntities.find((item) => item.kind === "source" && item.title === callSource);
+                const sourceItem = data.settingsEntities.find(
+                  (item) => item.kind === "source" && item.title === callSource,
+                );
                 return (
                   <tr key={call.id}>
                     <td>{index + 1}</td>
                     <td>{formatDate(call.callAt)}</td>
                     <td>
-                      <strong>{String(details.fullName || call.leadName || "رقم جديد")}</strong>
+                      <strong>
+                        {String(
+                          details.fullName || call.leadName || "رقم جديد",
+                        )}
+                      </strong>
                     </td>
                     <td>{call.phone}</td>
-                    <td>{String(details.secondaryPhone || lead?.secondaryPhone || "—")}</td>
+                    <td>
+                      {String(
+                        details.secondaryPhone || lead?.secondaryPhone || "—",
+                      )}
+                    </td>
                     <td>{String(details.track || lead?.interest || "—")}</td>
                     <td>{call.assignedEmployee || "—"}</td>
                     <td>{call.branchName || "—"}</td>
                     <td>
                       {callSource ? (
                         <span className="source-chip">
-                          <SourceMark small icon={sourceDetails(sourceItem || ({ customData: "{}" } as SettingsEntity)).icon} />
+                          <SourceMark
+                            small
+                            icon={
+                              sourceDetails(
+                                sourceItem ||
+                                  ({ customData: "{}" } as SettingsEntity),
+                              ).icon
+                            }
+                          />
                           {callSource}
                         </span>
                       ) : (
@@ -11220,7 +11488,13 @@ function ReceivedCallsPageV2({ data, add }: { data: Setup; add: () => void }) {
 
 function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
   const today = todayDateKey();
-  const [draftFilters, setDraftFilters] = useState({ query: "", dateFrom: today, dateTo: today, branch: "", source: "" });
+  const [draftFilters, setDraftFilters] = useState({
+    query: "",
+    dateFrom: today,
+    dateTo: today,
+    branch: "",
+    source: "",
+  });
   const [appliedFilters, setAppliedFilters] = useState(draftFilters);
   const { query, dateFrom, dateTo, branch, source } = appliedFilters;
   const [historyCall, setHistoryCall] = useState<CallRecord | null>(null);
@@ -11241,8 +11515,21 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
       const details = detailsFor(call);
       const date = localDateKey(call.callAt);
       const callSource = String(details.source || lead?.source || "");
-      const searchable = [details.fullName, call.leadName, call.phone, details.secondaryPhone].join(" ").toLowerCase();
-      return searchable.includes(query.toLowerCase()) && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo) && (!branch || String(call.branchId) === branch) && (!source || callSource === source);
+      const searchable = [
+        details.fullName,
+        call.leadName,
+        call.phone,
+        details.secondaryPhone,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return (
+        searchable.includes(query.toLowerCase()) &&
+        (!dateFrom || date >= dateFrom) &&
+        (!dateTo || date <= dateTo) &&
+        (!branch || String(call.branchId) === branch) &&
+        (!source || callSource === source)
+      );
     });
   async function convert(call: CallRecord) {
     setConverting(call.id);
@@ -11256,23 +11543,56 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "تعذر تحويل العميل إلى طالب");
+      if (!response.ok)
+        throw new Error(result.error || "تعذر تحويل العميل إلى طالب");
       setConverted((current) => new Set([...current, call.id]));
     } catch (reason) {
-      window.alert(reason instanceof Error ? reason.message : "تعذر تحويل العميل إلى طالب");
+      window.alert(
+        reason instanceof Error ? reason.message : "تعذر تحويل العميل إلى طالب",
+      );
     } finally {
       setConverting(null);
     }
   }
-  const historyCalls = historyCall ? data.calls.filter((call) => (historyCall.leadId && call.leadId === historyCall.leadId) || phoneKey(call.phone) === phoneKey(historyCall.phone)) : [];
-  const historyFollowups = historyCall?.leadId ? data.followups.filter((followup) => followup.leadId === historyCall.leadId) : [];
+  const historyCalls = historyCall
+    ? data.calls.filter(
+        (call) =>
+          (historyCall.leadId && call.leadId === historyCall.leadId) ||
+          phoneKey(call.phone) === phoneKey(historyCall.phone),
+      )
+    : [];
+  const historyFollowups = historyCall?.leadId
+    ? data.followups.filter(
+        (followup) => followup.leadId === historyCall.leadId,
+      )
+    : [];
   return (
     <div className="content-stack received-calls">
       <section className="metrics">
-        <Metric label="المكالمات الواردة" value={calls.length} hint="ضمن الفلاتر الحالية" tone="green" />
-        <Metric label="مرتبطة بـLead" value={calls.filter((call) => call.leadId).length} hint="عملاء مسجلون" tone="blue" />
-        <Metric label="أرقام جديدة" value={calls.filter((call) => !call.leadId).length} hint="تحتاج تسجيل Lead" tone="orange" />
-        <Metric label="تم الرد" value={calls.filter((call) => call.result === "answered").length} hint="مكالمات مكتملة" tone="purple" />
+        <Metric
+          label="المكالمات الواردة"
+          value={calls.length}
+          hint="ضمن الفلاتر الحالية"
+          tone="green"
+        />
+        <Metric
+          label="مرتبطة بـLead"
+          value={calls.filter((call) => call.leadId).length}
+          hint="عملاء مسجلون"
+          tone="blue"
+        />
+        <Metric
+          label="أرقام جديدة"
+          value={calls.filter((call) => !call.leadId).length}
+          hint="تحتاج تسجيل Lead"
+          tone="orange"
+        />
+        <Metric
+          label="تم الرد"
+          value={calls.filter((call) => call.result === "answered").length}
+          hint="مكالمات مكتملة"
+          tone="purple"
+        />
       </section>
       <section className="panel">
         <div className="panel-head">
@@ -11290,17 +11610,43 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
         <div className="lead-filters">
           <label className="search">
             <span>⌕</span>
-            <input value={draftFilters.query} onChange={(event) => setDraftFilters({ ...draftFilters, query: event.target.value })} placeholder="ابحث بالاسم أو الموبايل..." />
+            <input
+              value={draftFilters.query}
+              onChange={(event) =>
+                setDraftFilters({ ...draftFilters, query: event.target.value })
+              }
+              placeholder="ابحث بالاسم أو الموبايل..."
+            />
           </label>
           <label>
             <span>من</span>
-            <input type="date" value={draftFilters.dateFrom} onChange={(event) => setDraftFilters({ ...draftFilters, dateFrom: event.target.value })} />
+            <input
+              type="date"
+              value={draftFilters.dateFrom}
+              onChange={(event) =>
+                setDraftFilters({
+                  ...draftFilters,
+                  dateFrom: event.target.value,
+                })
+              }
+            />
           </label>
           <label>
             <span>إلى</span>
-            <input type="date" value={draftFilters.dateTo} onChange={(event) => setDraftFilters({ ...draftFilters, dateTo: event.target.value })} />
+            <input
+              type="date"
+              value={draftFilters.dateTo}
+              onChange={(event) =>
+                setDraftFilters({ ...draftFilters, dateTo: event.target.value })
+              }
+            />
           </label>
-          <select value={draftFilters.branch} onChange={(event) => setDraftFilters({ ...draftFilters, branch: event.target.value })}>
+          <select
+            value={draftFilters.branch}
+            onChange={(event) =>
+              setDraftFilters({ ...draftFilters, branch: event.target.value })
+            }
+          >
             <option value="">كل الفروع</option>
             {data.branches.map((item) => (
               <option key={item.id} value={item.id}>
@@ -11308,7 +11654,12 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
               </option>
             ))}
           </select>
-          <select value={draftFilters.source} onChange={(event) => setDraftFilters({ ...draftFilters, source: event.target.value })}>
+          <select
+            value={draftFilters.source}
+            onChange={(event) =>
+              setDraftFilters({ ...draftFilters, source: event.target.value })
+            }
+          >
             <option value="">كل المصادر</option>
             {data.settingsEntities
               .filter((item) => item.kind === "source")
@@ -11318,13 +11669,22 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
                 </option>
               ))}
           </select>
-          <button className="primary" onClick={() => setAppliedFilters(draftFilters)}>
+          <button
+            className="primary"
+            onClick={() => setAppliedFilters(draftFilters)}
+          >
             ⌕ بحث
           </button>
           <button
             className="secondary"
             onClick={() => {
-              const reset = { query: "", dateFrom: today, dateTo: today, branch: "", source: "" };
+              const reset = {
+                query: "",
+                dateFrom: today,
+                dateTo: today,
+                branch: "",
+                source: "",
+              };
               setDraftFilters(reset);
               setAppliedFilters(reset);
             }}
@@ -11356,26 +11716,47 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
                 const lead = data.leads.find((item) => item.id === call.leadId);
                 const details = detailsFor(call);
                 const callSource = String(details.source || lead?.source || "");
-                const sourceItem = data.settingsEntities.find((item) => item.kind === "source" && item.title === callSource);
+                const sourceItem = data.settingsEntities.find(
+                  (item) => item.kind === "source" && item.title === callSource,
+                );
                 const storedFinalStatus = String(details.finalStatus || "");
-                const finalStatus = converted.has(call.id) ? "Registered" : storedFinalStatus || "Not Yet";
-                const convertedProfile = finalStatus === "Registered" || finalStatus === "Paid";
+                const finalStatus = converted.has(call.id)
+                  ? "Registered"
+                  : storedFinalStatus || "Not Yet";
+                const convertedProfile =
+                  finalStatus === "Registered" || finalStatus === "Paid";
                 return (
                   <tr key={call.id}>
                     <td>{index + 1}</td>
                     <td>{formatDate(call.callAt)}</td>
                     <td>
-                      <strong>{String(details.fullName || call.leadName || "رقم جديد")}</strong>
+                      <strong>
+                        {String(
+                          details.fullName || call.leadName || "رقم جديد",
+                        )}
+                      </strong>
                     </td>
                     <td>{displayCustomerPhone(call.phone)}</td>
-                    <td>{displayCustomerPhone(details.secondaryPhone || lead?.secondaryPhone)}</td>
+                    <td>
+                      {displayCustomerPhone(
+                        details.secondaryPhone || lead?.secondaryPhone,
+                      )}
+                    </td>
                     <td>{String(details.track || lead?.interest || "—")}</td>
                     <td>{call.assignedEmployee || "—"}</td>
                     <td>{call.branchName || "—"}</td>
                     <td>
                       {callSource ? (
                         <span className="source-chip">
-                          <SourceMark small icon={sourceDetails(sourceItem || ({ customData: "{}" } as SettingsEntity)).icon} />
+                          <SourceMark
+                            small
+                            icon={
+                              sourceDetails(
+                                sourceItem ||
+                                  ({ customData: "{}" } as SettingsEntity),
+                              ).icon
+                            }
+                          />
                           {callSource}
                         </span>
                       ) : (
@@ -11384,14 +11765,26 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
                     </td>
                     <td>{String(details.interestStatus || "—")}</td>
                     <td>
-                      <span className={`final-status ${finalStatus.toLowerCase().replace(/\s+/g, "-")}`}>{finalStatus}</span>
+                      <span
+                        className={`final-status ${finalStatus.toLowerCase().replace(/\s+/g, "-")}`}
+                      >
+                        {finalStatus}
+                      </span>
                     </td>
                     <td>
                       {convertedProfile ? (
-                        <span className="final-status registered">✓ تم التحويل</span>
+                        <span className="final-status registered">
+                          ✓ تم التحويل
+                        </span>
                       ) : finalStatus === "Not Yet" ? (
-                        <button className="convert-student" disabled={converting === call.id} onClick={() => convert(call)}>
-                          {converting === call.id ? "جارٍ التحويل..." : "♙ Convert to Student"}
+                        <button
+                          className="convert-student"
+                          disabled={converting === call.id}
+                          onClick={() => convert(call)}
+                        >
+                          {converting === call.id
+                            ? "جارٍ التحويل..."
+                            : "♙ Convert to Student"}
                         </button>
                       ) : (
                         "—"
@@ -11399,7 +11792,11 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
                     </td>
                     <td>
                       <div className="lead-actions">
-                        <button className="history" onClick={() => setHistoryCall(call)} title="سجل المكالمات والمتابعات">
+                        <button
+                          className="history"
+                          onClick={() => setHistoryCall(call)}
+                          title="سجل المكالمات والمتابعات"
+                        >
                           ☷
                         </button>
                       </div>
@@ -11412,13 +11809,20 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
         </div>
       </section>
       {historyCall && (
-        <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && setHistoryCall(null)}>
+        <div
+          className="overlay"
+          onMouseDown={(event) =>
+            event.target === event.currentTarget && setHistoryCall(null)
+          }
+        >
           <section className="dialog history-dialog">
             <div className="dialog-head">
               <div>
                 <span className="dialog-icon">◉</span>
                 <div>
-                  <h2>سجل العميل [{displayCustomerPhone(historyCall.phone)}]</h2>
+                  <h2>
+                    سجل العميل [{displayCustomerPhone(historyCall.phone)}]
+                  </h2>
                   <p>كل المكالمات الواردة والصادرة والمتابعات</p>
                 </div>
               </div>
@@ -11441,7 +11845,11 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
                     <tbody>
                       {historyCalls.map((call) => (
                         <tr key={call.id}>
-                          <td>{call.direction === "incoming" ? "واردة" : "صادرة / Follow up"}</td>
+                          <td>
+                            {call.direction === "incoming"
+                              ? "واردة"
+                              : "صادرة / Follow up"}
+                          </td>
                           <td>
                             <CallResult value={call.result} />
                           </td>
@@ -11489,7 +11897,10 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
               )}
             </div>
             <div className="dialog-foot">
-              <button className="secondary" onClick={() => setHistoryCall(null)}>
+              <button
+                className="secondary"
+                onClick={() => setHistoryCall(null)}
+              >
                 إغلاق
               </button>
             </div>
@@ -11498,6 +11909,797 @@ function ReceivedCallsPageV3({ data, add }: { data: Setup; add: () => void }) {
       )}
     </div>
   );
+}
+
+type StudentCallTaskMode = "missing" | "remaining" | "visitor";
+type StudentCallTaskRow = {
+  student: Student;
+  purchasedLevels: number;
+  remainingLevels: number;
+  lastBatch: string;
+  lastLevel: string;
+  paymentDate: string;
+  visitorSequence?: number;
+  visitorDueDate?: string;
+  lastTask?: StudentRecord;
+};
+
+function StudentCallTasksPage({
+  data,
+  mutate,
+  setNotice,
+  mode,
+}: {
+  data: Setup;
+  mutate: (payload: Record<string, unknown>) => Promise<void>;
+  setNotice: (message: string) => void;
+  mode: StudentCallTaskMode;
+}) {
+  const [query, setQuery] = useState(""),
+    [from, setFrom] = useState(""),
+    [to, setTo] = useState(""),
+    [status, setStatus] = useState(""),
+    [visitorSequenceFilter, setVisitorSequenceFilter] = useState<number | "all">(1),
+    [tablePage, setTablePage] = useState(1),
+    [selected, setSelected] = useState<StudentCallTaskRow | null>(null),
+    [historyStudent, setHistoryStudent] = useState<StudentCallTaskRow | null>(
+      null,
+    ),
+    [profileNotesStudent, setProfileNotesStudent] =
+      useState<StudentCallTaskRow | null>(null),
+    [callStatus, setCallStatus] = useState("Pending"),
+    [reason, setReason] = useState(""),
+    [result, setResult] = useState(""),
+    [channel, setChannel] = useState("Call"),
+    [saving, setSaving] = useState(false),
+    callNotesRef = useRef("");
+  const labels: Record<StudentCallTaskMode, [string, string]> = {
+    missing: [
+      "Missing Calls",
+      "طلاب دفعوا New Comers ولم يتم تسكينهم في أي جروب.",
+    ],
+    remaining: [
+      "Remaining Calls",
+      "طلاب تم تصعيدهم وما زالت لديهم مستويات متبقية.",
+    ],
+    visitor: [
+      "Visitor Calls",
+      "بروفايلات بلا مدفوعات ومستويات لمتابعتهم بنفس تواريخ الـ Leads Follow Up.",
+    ],
+  };
+  const visitorFollowupDays = [0, 1, 6, 13, 24];
+  const todayKey = egyptDateKey();
+  const visitorDueFrom = from || to || todayKey;
+  const visitorDueTo = to || from || todayKey;
+  const activeDateFrom = mode === "visitor" && visitorSequenceFilter !== "all" ? visitorDueFrom : from;
+  const activeDateTo = mode === "visitor" && visitorSequenceFilter !== "all" ? visitorDueTo : to;
+
+  const { rows, reasons } = useMemo(() => {
+    const groups = new Map(
+      data.settingsEntities
+        .filter((item) => item.kind === "group")
+        .map((item) => [item.id, item]),
+    );
+    const batches = new Map(
+      data.settingsEntities
+        .filter((item) => item.kind === "education_batch")
+        .map((item) => [item.id, item.title]),
+    );
+    const levels = new Map(
+      data.settingsEntities
+        .filter((item) => item.kind === "level")
+        .map((item) => [item.id, item.title]),
+    );
+    const membersByStudent = new Map<number, typeof data.groupMembers>();
+    data.groupMembers.forEach((member) =>
+      membersByStudent.set(member.studentId, [
+        ...(membersByStudent.get(member.studentId) || []),
+        member,
+      ]),
+    );
+    const paymentsByStudent = new Map<number, StudentRecord[]>();
+    data.studentRecords
+      .filter((record) => record.kind === "payment")
+      .forEach((record) =>
+        paymentsByStudent.set(record.studentId, [
+          ...(paymentsByStudent.get(record.studentId) || []),
+          record,
+        ]),
+      );
+    const tasksByStudent = new Map<number, StudentRecord>();
+    const visitorCallsByStudent = new Map<number, StudentRecord[]>();
+    data.studentRecords
+      .filter(
+        (record) =>
+          record.kind === "student_call_task" &&
+          studentRecordDetails(record).callTaskType === mode,
+      )
+      .forEach((record) => {
+        const previous = tasksByStudent.get(record.studentId);
+        if (
+          !previous ||
+          new Date(record.recordDate).getTime() >
+            new Date(previous.recordDate).getTime()
+        )
+          tasksByStudent.set(record.studentId, record);
+        if (mode === "visitor")
+          visitorCallsByStudent.set(record.studentId, [
+            ...(visitorCallsByStudent.get(record.studentId) || []),
+            record,
+          ]);
+      });
+    // visitor follow-up/date variables are computed outside the memo
+    const rows = data.students
+      .map((student): StudentCallTaskRow | null => {
+        const payments = paymentsByStudent.get(student.id) || [];
+        const activeMainPayments = payments.filter((record) => {
+          const details = studentRecordDetails(record);
+          return Boolean(details.isMainPayment) && !details.voided;
+        });
+        const purchasedLevels = activeMainPayments.reduce((total, record) => {
+          const details = studentRecordDetails(record);
+          return (
+            total +
+            Math.max(
+              0,
+              Number(details.levels || 0) -
+                Number(details.refundedLevels || 0) -
+                Number(details.transferredLevels || 0),
+            )
+          );
+        }, 0);
+        const newComersLevels = activeMainPayments.reduce((total, record) => {
+          const details = studentRecordDetails(record);
+          return String(details.paymentType || "")
+            .toLowerCase()
+            .includes("new comer")
+            ? total +
+                Math.max(
+                  0,
+                  Number(details.levels || 0) -
+                    Number(details.refundedLevels || 0) -
+                    Number(details.transferredLevels || 0),
+                )
+            : total;
+        }, 0);
+        const newComersPayments = activeMainPayments
+          .filter((record) =>
+            String(studentRecordDetails(record).paymentType || "")
+              .toLowerCase()
+              .includes("new comer"),
+          )
+          .sort((a, b) =>
+            String(b.recordDate).localeCompare(String(a.recordDate)),
+          );
+        const memberships = [...(membersByStudent.get(student.id) || [])].sort(
+          (a, b) => String(b.joinedAt).localeCompare(String(a.joinedAt)),
+        );
+        const lastMembership = memberships[0],
+          group = lastMembership
+            ? groups.get(lastMembership.groupId)
+            : undefined,
+          groupDetails = group
+            ? studentRecordDetails({
+                customData: group.customData,
+              } as StudentRecord)
+            : {};
+        const visitorCalls = [...(visitorCallsByStudent.get(student.id) || [])].sort((a, b) => String(b.recordDate).localeCompare(String(a.recordDate))),
+          nextVisitorSequence = Math.min(4, visitorCalls.length + 1),
+          visitorSequence =
+            mode === "visitor" && visitorSequenceFilter !== "all"
+              ? visitorSequenceFilter
+              : nextVisitorSequence,
+          visitorBase = new Date(
+            `${String(student.createdAt).slice(0, 10)}T12:00:00Z`,
+          ),
+          visitorDue = new Date(
+            visitorBase.getTime() +
+              (visitorFollowupDays[visitorSequence] || 24) * 86400000,
+          )
+            .toISOString()
+            .slice(0, 10),
+          currentVisitorTask = visitorCalls.find((record) => Number(studentRecordDetails(record).visitorSequence) === visitorSequence),
+          paymentDate = String(newComersPayments[0]?.recordDate || ""),
+          row = {
+            student:
+              mode === "missing" && paymentDate
+                ? { ...student, createdAt: paymentDate }
+                : student,
+            purchasedLevels,
+            remainingLevels: Math.max(
+              0,
+              purchasedLevels -
+                memberships.length -
+                Number(studentDetails(student).misplacedLevelAdjustment || 0),
+            ),
+            lastBatch: Number(groupDetails.batchId)
+              ? batches.get(Number(groupDetails.batchId)) || "-"
+              : "-",
+            lastLevel: Number(groupDetails.levelId)
+              ? levels.get(Number(groupDetails.levelId)) || "-"
+              : student.levelName || "-",
+            paymentDate,
+            visitorSequence,
+            visitorDueDate: visitorDue,
+            lastTask: mode === "visitor" && visitorSequenceFilter !== "all" ? currentVisitorTask : tasksByStudent.get(student.id),
+          };
+        if (
+          mode === "missing" &&
+          newComersLevels > 0 &&
+          memberships.length === 0
+        )
+          return row;
+        if (
+          mode === "remaining" &&
+          memberships.length > 0 &&
+          row.remainingLevels > 0
+        )
+          return row;
+        if (
+          mode === "visitor" &&
+          purchasedLevels <= 0 &&
+          memberships.length === 0 &&
+          (visitorSequenceFilter === "all" ||
+            (visitorDue >= visitorDueFrom && visitorDue <= visitorDueTo))
+        )
+          return row;
+        return null;
+      })
+      .filter((row): row is StudentCallTaskRow => Boolean(row))
+      .filter((row) => {
+        const haystack =
+          `${row.student.fullName} ${row.student.mobile} ${row.student.secondaryMobile || ""}`.toLowerCase();
+        const date = String(
+            mode === "missing"
+              ? row.paymentDate
+              : mode === "visitor"
+                ? row.visitorDueDate
+                : row.student.createdAt,
+          ).slice(0, 10),
+          taskStatus = row.lastTask
+            ? String(
+                studentRecordDetails(row.lastTask).callStatus ||
+                  row.lastTask.status,
+              )
+            : "Pending";
+        return (
+          (!query || haystack.includes(query.toLowerCase())) &&
+          (!activeDateFrom || date >= activeDateFrom) &&
+          (!activeDateTo || date <= activeDateTo) &&
+          (!status || taskStatus === status)
+        );
+      })
+      .sort((a, b) =>
+        String(
+          mode === "missing"
+            ? a.paymentDate
+            : mode === "visitor"
+              ? a.visitorDueDate
+              : a.student.createdAt,
+        ).localeCompare(
+          String(
+            mode === "missing"
+              ? b.paymentDate
+              : mode === "visitor"
+                ? b.visitorDueDate
+                : b.student.createdAt,
+          ),
+        ),
+      );
+    const reasons = data.settingsEntities
+      .filter(
+        (item) =>
+          item.kind ===
+            (mode === "visitor"
+              ? "visitor_call_reason"
+              : "student_call_reason") && item.isActive,
+      )
+      .map((item) => item.title);
+    return { rows, reasons };
+  }, [data, mode, query, from, to, status, visitorSequenceFilter]);
+  useEffect(() => {
+    setTablePage(1);
+  }, [mode, query, from, to, status, visitorSequenceFilter]);
+  const tablePageSize = 100,
+    tablePageCount = Math.max(1, Math.ceil(rows.length / tablePageSize)),
+    currentTablePage = Math.min(tablePage, tablePageCount),
+    visibleRows = rows.slice((currentTablePage - 1) * tablePageSize, currentTablePage * tablePageSize);
+  const openTask = (row: StudentCallTaskRow) => {
+    setSelected(row);
+    setCallStatus("Pending");
+    setReason("");
+    setResult("");
+    setChannel("Call");
+    callNotesRef.current = "";
+  };
+  const history = historyStudent
+    ? data.studentRecords
+        .filter(
+          (record) =>
+            record.kind === "student_call_task" &&
+            record.studentId === historyStudent.student.id &&
+            studentRecordDetails(record).callTaskType === mode,
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.recordDate).getTime() - new Date(a.recordDate).getTime(),
+        )
+    : [];
+  const submit = async () => {
+    if (!selected || (!reason && !isNoAnswerResult)) return;
+    setSaving(true);
+    try {
+      await mutate({
+        action: "recordStudentCallTask",
+        studentId: selected.student.id,
+        taskType: mode,
+        callStatus,
+        reason,
+        result,
+        channel,
+        visitorSequence: selected.visitorSequence,
+        notes: callNotesRef.current,
+      });
+      setSelected(null);
+      setNotice("تم حفظ متابعة المكالمة");
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "تعذر حفظ متابعة المكالمة",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  const title = labels[mode];
+  const isNoAnswerResult = ["no_answer", "no answer"].includes(
+    result.trim().toLowerCase(),
+  );
+  return (
+    <div className="content-stack student-call-tasks">
+      {historyStudent && (
+        <div className="dialog-backdrop">
+          <section className="dialog student-call-history-dialog">
+            <div className="dialog-head">
+              <div>
+                <h2>Call History</h2>
+                <p>
+                  {historyStudent.student.fullName} -{" "}
+                  {displayCustomerPhone(historyStudent.student.mobile)}
+                </p>
+              </div>
+              <button
+                className="icon-button"
+                onClick={() => setHistoryStudent(null)}
+              >
+                ×
+              </button>
+            </div>
+            {history.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th>Result</th>
+                      <th>Reason</th>
+                      <th>Notes</th>
+                      <th>Employee</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((record) => {
+                      const detail = studentRecordDetails(record);
+                      return (
+                        <tr key={record.id}>
+                          <td>{formatEgyptDateTime(record.recordDate)}</td>
+                          <td>
+                            {String(detail.callStatus || record.status || "-")}
+                          </td>
+                          <td>{String(detail.result || "-")}</td>
+                          <td>{String(detail.reason || "-")}</td>
+                          <td className="notes-cell">{record.notes || "-"}</td>
+                          <td>{String(detail.createdBy || "-")}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty">
+                <h3>No calls yet</h3>
+              </div>
+            )}
+            <div className="dialog-foot">
+              <button
+                className="secondary"
+                onClick={() => setHistoryStudent(null)}
+              >
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {mode === "visitor" && (
+        <section className="sequence-summary visitor-sequence-summary">
+          <article>
+            <span>SEARCH BAR</span>
+            <h2>نتيجة البحث الحالية</h2>
+            <div className="sequence-search-summary">
+              <b>{mode === "visitor" && visitorSequenceFilter !== "all" ? `${visitorDueFrom} - ${visitorDueTo}` : from || to ? `${from || "..."} - ${to || "..."}` : "كل التواريخ"}</b>
+              <small>
+                {query ? `بحث: ${query}` : "كل أرقام الموبايل"} · {visitorSequenceFilter === "all" ? "All Data" : `Follow Up ${visitorSequenceFilter}`} · {rows.length} Visitors
+              </small>
+            </div>
+          </article>
+          <article>
+            <span>FOLLOWUP DETAILS</span>
+            <h2>تسلسل متابعة الـ Visitors</h2>
+            <div className="sequence-days">
+              <button
+                className={visitorSequenceFilter === "all" ? "active" : ""}
+                onClick={() => setVisitorSequenceFilter("all")}
+                type="button"
+              >
+                <b>All Data</b>
+                <small>كل الداتا</small>
+              </button>
+              {[1, 2, 3, 4].map((step) => (
+                <button
+                  className={visitorSequenceFilter === step ? "active" : ""}
+                  key={step}
+                  onClick={() => setVisitorSequenceFilter(step)}
+                  type="button"
+                >
+                  <b>Follow Up {step}</b>
+                  <small>بعد {[0, 1, 6, 13, 24][step]} أيام</small>
+                </button>
+              ))}
+            </div>
+          </article>
+        </section>
+      )}
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>{title[0]}</h2>
+            <p>{title[1]}</p>
+          </div>
+          <span className="tag support">{rows.length} Students</span>
+        </div>
+        <div className="student-call-filters">
+          <label className="search">
+            بحث سريع
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Name or mobile"
+            />
+          </label>
+          <label>
+            من تاريخ البروفايل
+            <input
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+            />
+          </label>
+          <label>
+            إلى تاريخ البروفايل
+            <input
+              type="date"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+            />
+          </label>
+          <label>
+            حالة المكالمة
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+            >
+              <option value="">كل الحالات</option>
+              <option value="Pending">Pending</option>
+              <option value="Follow Up">Follow Up</option>
+              <option value="Completed">Completed</option>
+            </select>
+          </label>
+          <button
+            className="secondary student-call-reset"
+            onClick={() => {
+              setQuery("");
+              setFrom("");
+              setTo("");
+              setStatus("");
+              if (mode === "visitor") setVisitorSequenceFilter(1);
+            }}
+          >
+            إعادة ضبط
+          </button>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Mobile</th>
+                <th>Profile Date</th>
+                {mode === "visitor" && (
+                  <>
+                    <th>Follow Up</th>
+                    <th>Visitor Call Date</th>
+                  </>
+                )}
+                <th>Track</th>
+                <th>Branch</th>
+                {mode === "remaining" ? (
+                  <>
+                    <th>Remaining Levels</th>
+                    <th>Last Batch</th>
+                    <th>Level</th>
+                  </>
+                ) : mode === "missing" ? (
+                  <th>New Comers Levels</th>
+                ) : (
+                  <th>Levels</th>
+                )}
+                <th>Call Status</th>
+                <th>Result</th>
+                <th>Reason</th>
+                <th>Notes</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const detail = row.lastTask
+                  ? studentRecordDetails(row.lastTask)
+                  : {};
+                return (
+                  <tr key={row.student.id}>
+                    <td>
+                      <strong>{row.student.fullName}</strong>
+                    </td>
+                    <td>
+                      <a href={`tel:${row.student.mobile}`}>
+                        {displayCustomerPhone(row.student.mobile)}
+                      </a>
+                    </td>
+                    <td>{formatEgyptDate(row.student.createdAt)}</td>
+                    {mode === "visitor" && (
+                      <>
+                        <td>Follow Up {row.visitorSequence}</td>
+                        <td>{row.visitorDueDate}</td>
+                      </>
+                    )}
+                    <td>{row.student.trackName || "-"}</td>
+                    <td>{row.student.branchName || "-"}</td>
+                    {mode === "remaining" ? (
+                      <>
+                        <td>{row.remainingLevels}</td>
+                        <td>{row.lastBatch}</td>
+                        <td>{row.lastLevel}</td>
+                      </>
+                    ) : (
+                      <td>
+                        {mode === "missing"
+                          ? row.purchasedLevels
+                          : row.purchasedLevels || "-"}
+                      </td>
+                    )}
+                    <td>
+                      <span className="tag support">
+                        {String(
+                          detail.callStatus ||
+                            row.lastTask?.status ||
+                            "Pending",
+                        )}
+                      </span>
+                    </td>
+                    <td>{String(detail.result || "-")}</td>
+                    <td>{String(detail.reason || "-")}</td>
+                    <td className="notes-cell">{row.lastTask?.notes || "-"}</td>
+                    <td>
+                      <div className="student-call-actions">
+                        {mode === "visitor" && (
+                          <button
+                            className="student-call-history"
+                            onClick={() => setProfileNotesStudent(row)}
+                          >
+                            Profile Notes
+                          </button>
+                        )}
+                        <button
+                          className="student-call-history"
+                          onClick={() => setHistoryStudent(row)}
+                        >
+                          History
+                        </button>
+                        <button
+                          className="student-call-action"
+                          onClick={() => openTask(row)}
+                        >
+                          Call
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!rows.length && (
+          <div className="empty">
+            <h3>لا توجد نتائج مطابقة</h3>
+            <p>غيّر الفلاتر أو أضف أسباب المكالمات من Admin Settings.</p>
+          </div>
+        )}
+      </section>
+      {profileNotesStudent && (
+        <div className="dialog-backdrop">
+          <section className="dialog">
+            <div className="dialog-head">
+              <div>
+                <h2>Profile Notes</h2>
+                <p>{profileNotesStudent.student.fullName}</p>
+              </div>
+              <button
+                className="icon-button"
+                onClick={() => setProfileNotesStudent(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="dialog-body">
+              <p className="profile-notes-text">
+                {String(
+                  studentDetails(profileNotesStudent.student).notes ||
+                    studentDetails(profileNotesStudent.student).note ||
+                    studentDetails(profileNotesStudent.student).profileNotes ||
+                    "لا توجد ملاحظات على البروفايل",
+                )}
+              </p>
+            </div>
+            <div className="dialog-foot">
+              <button
+                className="secondary"
+                onClick={() => setProfileNotesStudent(null)}
+              >
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {selected && (
+        <div className="dialog-backdrop">
+          <section className="dialog">
+            <div className="dialog-head">
+              <div>
+                <h2>Call Status</h2>
+                <p>
+                  {selected.student.fullName} -{" "}
+                  {displayCustomerPhone(selected.student.mobile)}
+                </p>
+              </div>
+              <button className="icon-button" onClick={() => setSelected(null)}>
+                ×
+              </button>
+            </div>
+            <div className="dialog-body form-grid">
+              <label>
+                حالة المكالمة
+                <select
+                  value={callStatus}
+                  onChange={(event) => setCallStatus(event.target.value)}
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Follow Up">Follow Up</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </label>
+              {mode === "visitor" && (
+                <>
+                  <label>
+                    نوع المكالمة
+                    <select
+                      value={channel}
+                      onChange={(event) => setChannel(event.target.value)}
+                    >
+                      <option value="Call">Call</option>
+                      <option value="WhatsApp">WhatsApp</option>
+                      <option value="SMS">SMS</option>
+                    </select>
+                  </label>
+                </>
+              )}
+              <label>
+                نتيجة المكالمة
+                <select
+                  value={result}
+                  onChange={(event) => {
+                    setResult(event.target.value);
+                    if (
+                      ["no_answer", "no answer"].includes(
+                        event.target.value.trim().toLowerCase(),
+                      )
+                    )
+                      setReason("");
+                  }}
+                >
+                  <option value="">اختر النتيجة</option>
+                  {callResultOptions(data).map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                السبب
+                <select
+                  name="student-call-reason"
+                  hidden={isNoAnswerResult}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                >
+                  <option value="">اختر السبب</option>
+                  {reasons.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="full">
+                ملاحظة
+                <textarea
+                  defaultValue=""
+                  onChange={(event) => {
+                    callNotesRef.current = event.target.value;
+                  }}
+                  rows={4}
+                />
+              </label>
+              {!reasons.length && (
+                <p className="form-error">
+                  أضف أسباب المكالمات من Admin Settings أولاً.
+                </p>
+              )}
+            </div>
+            <div className="dialog-foot">
+              <button className="secondary" onClick={() => setSelected(null)}>
+                إلغاء
+              </button>
+              <button
+                className="primary"
+                disabled={saving || (!reason && !isNoAnswerResult)}
+                onClick={() => void submit()}
+              >
+                {saving ? "جارٍ الحفظ..." : "حفظ المتابعة"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperationCallsPage({ data }: { data: Setup }) {
+  const [query, setQuery] = useState(""), [from, setFrom] = useState(""), [to, setTo] = useState(""), [taskType, setTaskType] = useState(""), [status, setStatus] = useState("");
+  const students = new Map(data.students.map((student) => [student.id, student]));
+  const typeLabels: Record<string, string> = { missing: "Missing Calls", remaining: "Remaining Calls", visitor: "Visitor Calls" };
+  const rows = data.studentRecords.filter((record) => record.kind === "student_call_task").filter((record) => {
+    const details = studentRecordDetails(record), student = students.get(record.studentId), date = String(record.recordDate).slice(0, 10), haystack = `${record.studentName} ${student?.mobile || ""}`.toLowerCase();
+    return (!query || haystack.includes(query.toLowerCase())) && (!from || date >= from) && (!to || date <= to) && (!taskType || String(details.callTaskType) === taskType) && (!status || String(details.callStatus || record.status) === status);
+  }).sort((a, b) => new Date(b.recordDate).getTime() - new Date(a.recordDate).getTime());
+  return <div className="content-stack student-call-tasks"><section className="panel"><div className="panel-head"><div><h2>Operation Calls</h2><p>سجل موحد لكل مكالمات Missing و Remaining و Visitor Calls.</p></div><span className="tag support">{rows.length} Calls</span></div><div className="student-call-filters"><label className="search">بحث سريع<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name or mobile" /></label><label>من تاريخ المكالمة<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label><label>إلى تاريخ المكالمة<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label><label>نوع المكالمة<select value={taskType} onChange={(event) => setTaskType(event.target.value)}><option value="">كل المكالمات</option><option value="missing">Missing Calls</option><option value="remaining">Remaining Calls</option><option value="visitor">Visitor Calls</option></select></label><label>الحالة<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">كل الحالات</option><option value="Pending">Pending</option><option value="Follow Up">Follow Up</option><option value="Completed">Completed</option></select></label><button className="secondary student-call-reset" onClick={() => { setQuery(""); setFrom(""); setTo(""); setTaskType(""); setStatus(""); }}>إعادة ضبط</button></div></section><section className="panel"><div className="table-wrap"><table><thead><tr><th>Type</th><th>Student</th><th>Mobile</th><th>Call Date</th><th>Status</th><th>Result</th><th>Reason</th><th>Notes</th><th>Employee</th></tr></thead><tbody>{rows.map((record) => { const details = studentRecordDetails(record), student = students.get(record.studentId); return <tr key={record.id}><td><span className="tag support">{typeLabels[String(details.callTaskType)] || "-"}</span></td><td><strong>{record.studentName}</strong></td><td>{student ? <a href={`tel:${student.mobile}`}>{displayCustomerPhone(student.mobile)}</a> : "-"}</td><td>{formatEgyptDateTime(record.recordDate)}</td><td><span className="tag support">{String(details.callStatus || record.status || "Pending")}</span></td><td>{String(details.result || "-")}</td><td>{String(details.reason || "-")}</td><td className="notes-cell">{record.notes || "-"}</td><td>{String(details.createdBy || "-")}</td></tr>; })}</tbody></table></div>{!rows.length && <div className="empty"><h3>لا توجد مكالمات مطابقة</h3></div>}</section></div>;
 }
 
 function studentDetails(student: Student) {
@@ -11993,11 +13195,11 @@ function zeroLevelPaymentTypeLabel(title: string) {
 function paymentTypeLabel(record: StudentRecord, data: Setup): string {
   const details = studentRecordDetails(record),
     stored = String(details.paymentType || "").trim();
-  if (stored) return stored;
-  if (details.isDebtPayment) {
+  if (details.isDebtPayment || String(details.offer || details.originalOffer || "").toLowerCase().includes("rest of money")) {
     const main = data.studentRecords.find((item) => item.studentId === record.studentId && item.kind === "payment" && studentRecordDetails(item).isMainPayment && studentRecordDetails(item).main === details.main);
-    return main ? paymentTypeLabel(main, data) : "New Comers";
+    return main && main.id !== record.id ? paymentTypeLabel(main, data) : stored || "New Comers";
   }
+  if (stored) return stored;
   const levels = Math.max(0, Number(details.levels || 0));
   if (levels === 0) return zeroLevelPaymentTypeLabel(String(details.offer || details.offerName || ""));
   const prior = data.studentRecords
@@ -12007,7 +13209,7 @@ function paymentTypeLabel(record: StudentRecord, data: Setup): string {
     .sort((a, b) => a.record.recordDate.localeCompare(b.record.recordDate) || a.record.id - b.record.id);
   if (!prior.length) return "New Comers";
   if (egyptDateKey(systemDate(prior[0].record.recordDate)) === egyptDateKey(systemDate(record.recordDate))) return "New Comers";
-  const purchased = prior.reduce((sum, item) => sum + Math.max(0, Number(item.details.levels || 0) - Number(item.details.refundedLevels || 0)), 0),
+  const purchased = prior.reduce((sum, item) => sum + Math.max(0, Number(item.details.levels || 0) - Number(item.details.refundedLevels || 0) - Number(item.details.transferredLevels || 0)), 0),
     memberships = data.groupMembers.filter((item) => item.studentId === record.studentId && systemDate(item.joinedAt) <= systemDate(record.recordDate)).length,
     student = data.students.find((item) => item.id === record.studentId),
     adjustment = student ? Number(studentDetails(student).misplacedLevelAdjustment || 0) : 0;
@@ -12066,7 +13268,7 @@ function RetentionStatusPage({ data, mutate, setNotice }: { data: Setup; mutate:
         const payments = data.studentRecords.filter((record) => record.studentId === student.id && record.kind === "payment"),
           purchased = payments.reduce((sum, record) => {
             const item = recordDetails(record);
-            return sum + (item.isMainPayment && !item.voided ? Math.max(0, Number(item.levels || 0) - Number(item.refundedLevels || 0)) : 0);
+            return sum + (item.isMainPayment && !item.voided ? Math.max(0, Number(item.levels || 0) - Number(item.refundedLevels || 0) - Number(item.transferredLevels || 0)) : 0);
           }, 0),
           memberships = data.groupMembers.filter((member) => member.studentId === student.id).length,
           adjustment = Number(studentDetails(student).misplacedLevelAdjustment || 0),
@@ -13143,7 +14345,7 @@ function OperationsRetentionPage({ data, mutate, setNotice }: { data: Setup; mut
     return data.students
       .map((student) => {
         const mainPayments = (paymentsByStudent.get(student.id) || []).filter(({ item }) => item.isMainPayment && Number(item.levels || 0) > 0).sort((a, b) => a.record.recordDate.localeCompare(b.record.recordDate) || a.record.id - b.record.id),
-          purchased = mainPayments.reduce((sum, { item }) => sum + Math.max(0, Number(item.levels || 0) - Number(item.refundedLevels || 0)), 0);
+          purchased = mainPayments.reduce((sum, { item }) => sum + Math.max(0, Number(item.levels || 0) - Number(item.refundedLevels || 0) - Number(item.transferredLevels || 0)), 0);
         const memberships = (membersByStudent.get(student.id) || [])
           .map((member) => {
             const group = groupById.get(member.groupId),
@@ -13189,7 +14391,7 @@ function OperationsRetentionPage({ data, mutate, setNotice }: { data: Setup; mut
               .trim()
               .toLowerCase();
             if (stored === "retention") return true;
-            const priorPurchased = mainPayments.filter(({ record: itemRecord }) => itemRecord.recordDate < record.recordDate || (itemRecord.recordDate === record.recordDate && itemRecord.id < record.id)).reduce((sum, { item: priorItem }) => sum + Math.max(0, Number(priorItem.levels || 0) - Number(priorItem.refundedLevels || 0)), 0),
+            const priorPurchased = mainPayments.filter(({ record: itemRecord }) => itemRecord.recordDate < record.recordDate || (itemRecord.recordDate === record.recordDate && itemRecord.id < record.id)).reduce((sum, { item: priorItem }) => sum + Math.max(0, Number(priorItem.levels || 0) - Number(priorItem.refundedLevels || 0) - Number(priorItem.transferredLevels || 0)), 0),
               studiedAtPayment = memberships.filter((membership) => String(membership.info.startDate || membership.batchInfo.startDate || "").slice(0, 10) <= paymentDate).length;
             return Math.max(0, priorPurchased - studiedAtPayment - adjustment) === 0;
           }),
@@ -13694,7 +14896,7 @@ function RetentionReportPage({ data }: { data: Setup }) {
         const payments = data.studentRecords.filter((record) => record.studentId === student.id && record.kind === "payment"),
           purchased = payments.reduce((sum, record) => {
             const item = details(record);
-            return sum + (item.isMainPayment && !item.voided ? Math.max(0, Number(item.levels || 0) - Number(item.refundedLevels || 0)) : 0);
+            return sum + (item.isMainPayment && !item.voided ? Math.max(0, Number(item.levels || 0) - Number(item.refundedLevels || 0) - Number(item.transferredLevels || 0)) : 0);
           }, 0),
           memberships = data.groupMembers.filter((member) => member.studentId === student.id),
           adjustment = Number(studentDetails(student).misplacedLevelAdjustment || 0),
@@ -14004,7 +15206,7 @@ function RetentionDashboardPage({ data }: { data: Setup }) {
           const payment = studentRecordDetails(record);
           if (!payment.isMainPayment || payment.voided) return sum;
           const offer = entity("offer", payment.offerId);
-          return sum + Math.max(0, Number(payment.levels ?? info(offer).levels ?? 0) - Number(payment.refundedLevels || 0));
+          return sum + Math.max(0, Number(payment.levels ?? info(offer).levels ?? 0) - Number(payment.refundedLevels || 0) - Number(payment.transferredLevels || 0));
         }, 0),
         memberships = data.groupMembers.filter((member) => member.studentId === student.id),
         adjustment = Number(studentDetails(student).misplacedLevelAdjustment || 0),
@@ -14353,7 +15555,7 @@ function StudentsStatusPage({ data }: { data: Setup }) {
           const payment = studentRecordDetails(record);
           if (!payment.isMainPayment || payment.voided) return sum;
           const offer = entity("offer", payment.offerId);
-          return sum + Math.max(0, Number(payment.levels ?? info(offer).levels ?? 0) - Number(payment.refundedLevels || 0));
+          return sum + Math.max(0, Number(payment.levels ?? info(offer).levels ?? 0) - Number(payment.refundedLevels || 0) - Number(payment.transferredLevels || 0));
         }, 0),
         adjustment = Number(studentDetails(student).misplacedLevelAdjustment || 0),
         remaining = Math.max(0, purchased - memberships.length - adjustment),
@@ -15063,7 +16265,7 @@ function LegacyLeadsCallsReportPage({ data }: { data: Setup }) {
     paymentLevels = (detail: Record<string, unknown>) => {
       const offer = data.settingsEntities.find((item) => item.kind === "offer" && item.id === Number(detail.offerId)),
         offerDetail = offer ? safe(offer.customData) : {};
-      return Math.max(0, Number(detail.levels ?? offerDetail.levels ?? 0) - Number(detail.refundedLevels || 0));
+      return Math.max(0, Number(detail.levels ?? offerDetail.levels ?? 0) - Number(detail.refundedLevels || 0) - Number(detail.transferredLevels || 0));
     },
     registeredStudentIds = new Set(paymentRows.filter(({ detail }) => Boolean(detail.isMainPayment) && paymentLevels(detail) >= 1).map(({ record }) => record.studentId)),
     receiptValue = (detail: Record<string, unknown>) => Math.max(0, detail.netPaid !== undefined ? Number(detail.netPaid || 0) : Number(detail.paid || 0) - Number(detail.refunded || 0)),
@@ -16141,13 +17343,13 @@ function ChannelOffersReportPage({ data, channel }: { data: Setup; channel: "Lea
     };
   const channelOrigins = report.filteredOrigins.filter((origin) => origin.kind === channel),
     channelMains = report.mains.filter((main) => main.originType === channel),
-    registeredIds = new Set(channelOrigins.flatMap((origin) => origin.studentIds).filter(Boolean)),
     paidIds = new Set(channelMains.map((main) => main.record.studentId)),
+    registeredIds = new Set(channelOrigins.flatMap((origin) => origin.studentIds).filter((studentId) => Boolean(studentId) && !paidIds.has(studentId))),
     registered = registeredIds.size,
     paid = paidIds.size,
     totalOffers = channelMains.reduce((sum, main) => sum + main.offerValue, 0),
     conversion = channelOrigins.length ? (paid * 100) / channelOrigins.length : 0,
-    callCenter = channelOrigins.length ? (registered * 100) / channelOrigins.length : 0;
+    callCenter = channelOrigins.length ? ((registered + paid) * 100) / channelOrigins.length : 0;
   const finishRows = (
     buckets: Map<
       string,
@@ -16161,17 +17363,21 @@ function ChannelOffersReportPage({ data, channel }: { data: Setup; channel: "Lea
     >,
   ): ChannelPerformanceRow[] =>
     Array.from(buckets.values())
-      .map((row) => ({
-        label: row.label,
-        total: row.total,
-        registered: row.registered.size,
-        paid: row.paid.size,
-        conversion: row.total ? (row.paid.size * 100) / row.total : 0,
-        callCenter: row.total ? (row.registered.size * 100) / row.total : 0,
-        totalOffers: row.totalOffers,
-        offerShare: totalOffers ? (row.totalOffers * 100) / totalOffers : 0,
-        offerPerData: row.total ? row.totalOffers / row.total : 0,
-      }))
+      .map((row) => {
+        const paid = row.paid.size,
+          registered = Array.from(row.registered).filter((studentId) => !row.paid.has(studentId)).length;
+        return {
+          label: row.label,
+          total: row.total,
+          registered,
+          paid,
+          conversion: row.total ? (paid * 100) / row.total : 0,
+          callCenter: row.total ? ((registered + paid) * 100) / row.total : 0,
+          totalOffers: row.totalOffers,
+          offerShare: totalOffers ? (row.totalOffers * 100) / totalOffers : 0,
+          offerPerData: row.total ? row.totalOffers / row.total : 0,
+        };
+      })
       .sort((a, b) => b.totalOffers - a.totalOffers || b.total - a.total || a.label.localeCompare(b.label));
   const performanceRows = (field: "government" | "source" | "track" | "branch" | "employee") => {
     const buckets = new Map<
@@ -16244,9 +17450,12 @@ function ChannelOffersReportPage({ data, channel }: { data: Setup; channel: "Lea
         originIds: new Set<number>(),
         mains: 0,
       };
-    if (main.origin) row.originIds.add(main.origin.id);
-    row.registered.add(main.record.studentId);
-    row.paid.add(main.record.studentId);
+    if (main.origin) {
+      // A single inbound call is one acquisition even if duplicate student profiles exist.
+      row.originIds.add(main.origin.id);
+      row.registered.add(main.origin.id);
+      row.paid.add(main.origin.id);
+    }
     row.totalOffers += main.offerValue;
     row.mains++;
     monthBuckets.set(month, row);
@@ -16394,7 +17603,7 @@ function ChannelOffersReportPage({ data, channel }: { data: Setup; channel: "Lea
           <div>
             <small>Call Center</small>
             <strong>{lcPercent(callCenter)}</strong>
-            <em>Registered ÷ total {isLead ? "leads" : "calls"}</em>
+            <em>Registered + Paid ÷ total {isLead ? "leads" : "calls"}</em>
           </div>
         </article>
       </section>
@@ -16560,7 +17769,7 @@ function MtdDashboardPage({ data, reload }: { data: Setup; reload: (query: Recor
     paymentLevels = (detail: Record<string, unknown>) => {
       const offer = data.settingsEntities.find((item) => item.kind === "offer" && item.id === Number(detail.offerId)),
         offerDetail = offer ? safe(offer.customData) : {};
-      return Math.max(0, Number(detail.levels ?? offerDetail.levels ?? 0) - Number(detail.refundedLevels || 0));
+      return Math.max(0, Number(detail.levels ?? offerDetail.levels ?? 0) - Number(detail.refundedLevels || 0) - Number(detail.transferredLevels || 0));
     },
     learningMains = allPayments.filter(({ detail }) => Boolean(detail.isMainPayment) && paymentLevels(detail) >= 1).sort((a, b) => a.record.recordDate.localeCompare(b.record.recordDate) || a.record.id - b.record.id),
     firstLearningMainByStudent = new Map<number, { record: StudentRecord; detail: Record<string, unknown> }>();
@@ -19202,22 +20411,23 @@ function StudentInstallmentsDialog({ student, data, mutate, setNotice, onClose, 
   );
 }
 
-function StudentsListPanel({ data, mutate, setNotice, onOpenProfile }: { data: Setup; mutate: (payload: Record<string, unknown>) => Promise<void>; setNotice: (message: string) => void; onOpenProfile: (student: Student) => void }) {
+function StudentsListPanel({ data, mutate, reload, setNotice, onOpenProfile, initialFilters, onFiltersChange }: { data: Setup; mutate: (payload: Record<string, unknown>) => Promise<void>; reload: (query: Record<string, string>) => Promise<void>; setNotice: (message: string) => void; onOpenProfile: (student: Student) => void; initialFilters: Record<string, string>; onFiltersChange: (filters: Record<string, string>) => void }) {
   const today = todayDateKey(),
-    [query, setQuery] = useState(""),
-    [dateFrom, setDateFrom] = useState(today),
-    [dateTo, setDateTo] = useState(today),
-    [level, setLevel] = useState(""),
-    [branch, setBranch] = useState(""),
-    [status, setStatus] = useState(""),
+    [query, setQuery] = useState(initialFilters.search || ""),
+    [dateFrom, setDateFrom] = useState(initialFilters.from || today),
+    [dateTo, setDateTo] = useState(initialFilters.to || today),
+    [level, setLevel] = useState(initialFilters.level || ""),
+    [branch, setBranch] = useState(initialFilters.branch || ""),
+    [status, setStatus] = useState(initialFilters.status || ""),
     [applied, setApplied] = useState({
-      query: "",
-      dateFrom: today,
-      dateTo: today,
-      level: "",
-      branch: "",
-      status: "",
+      query: initialFilters.search || "",
+      dateFrom: initialFilters.from || today,
+      dateTo: initialFilters.to || today,
+      level: initialFilters.level || "",
+      branch: initialFilters.branch || "",
+      status: initialFilters.status || "",
     }),
+    [searching, setSearching] = useState(false),
     [filtersOpen, setFiltersOpen] = useState(false),
     [editor, setEditor] = useState<Student | null | undefined>(undefined),
     [placementStudent, setPlacementStudent] = useState<{
@@ -19226,6 +20436,16 @@ function StudentsListPanel({ data, mutate, setNotice, onOpenProfile }: { data: S
     } | null>(null),
     [paymentStudent, setPaymentStudent] = useState<Student | null>(null),
     [installmentsStudent, setInstallmentsStudent] = useState<Student | null>(null);
+  useEffect(() => {
+    const next = { query: initialFilters.search || "", dateFrom: initialFilters.from || today, dateTo: initialFilters.to || today, level: initialFilters.level || "", branch: initialFilters.branch || "", status: initialFilters.status || "" };
+    setQuery(next.query);
+    setDateFrom(next.dateFrom);
+    setDateTo(next.dateTo);
+    setLevel(next.level);
+    setBranch(next.branch);
+    setStatus(next.status);
+    setApplied(next);
+  }, [initialFilters.search, initialFilters.from, initialFilters.to, initialFilters.level, initialFilters.branch, initialFilters.status, today]);
   const paymentSummary = useMemo(() => {
     const map = new Map<number, { paid: number; openInstallments: number }>();
     data.studentRecords
@@ -19247,18 +20467,30 @@ function StudentsListPanel({ data, mutate, setNotice, onOpenProfile }: { data: S
   }, [data.studentRecords]);
   const students = data.students.filter((student) => {
     const created = localDateKey(student.createdAt),
-      haystack = [student.fullName, student.mobile, student.secondaryMobile, student.email, student.trackName, student.branchName, String(studentDetails(student).createdBy || "")].join(" ").toLowerCase();
-    return haystack.includes(applied.query.toLowerCase()) && (!applied.dateFrom || created >= applied.dateFrom) && (!applied.dateTo || created <= applied.dateTo) && (!applied.level || String(student.levelId) === applied.level) && (!applied.branch || String(student.branchId) === applied.branch) && (!applied.status || student.status === applied.status);
+      query = applied.query.toLowerCase(),
+      phoneQuery = phoneSearchValue(applied.query),
+      haystack = [student.fullName, student.mobile, student.secondaryMobile, student.email, student.trackName, student.branchName, String(studentDetails(student).createdBy || "")].join(" ").toLowerCase(),
+      phoneMatches = Boolean(phoneQuery) && [student.mobile, student.secondaryMobile].some((phone) => phoneSearchValue(phone).includes(phoneQuery));
+    return (haystack.includes(query) || phoneMatches) && (!applied.dateFrom || created >= applied.dateFrom) && (!applied.dateTo || created <= applied.dateTo) && (!applied.level || String(student.levelId) === applied.level) && (!applied.branch || String(student.branchId) === applied.branch) && (!applied.status || student.status === applied.status);
   });
-  const apply = () =>
-      setApplied({
+  const apply = async () => {
+      const next = {
         query: query.trim(),
-        dateFrom,
-        dateTo,
+        dateFrom: dateFrom <= dateTo ? dateFrom : dateTo,
+        dateTo: dateFrom <= dateTo ? dateTo : dateFrom,
         level,
         branch,
         status,
-      }),
+      };
+      setSearching(true);
+      try {
+        await reload({ from: next.dateFrom, to: next.dateTo, search: next.query, level: next.level, branch: next.branch, status: next.status });
+        setApplied(next);
+        onFiltersChange({ from: next.dateFrom, to: next.dateTo, search: next.query, level: next.level, branch: next.branch, status: next.status });
+      } finally {
+        setSearching(false);
+      }
+    },
     reset = () => {
       setQuery("");
       setDateFrom(today);
@@ -19274,6 +20506,8 @@ function StudentsListPanel({ data, mutate, setNotice, onOpenProfile }: { data: S
         branch: "",
         status: "",
       });
+      onFiltersChange({ from: today, to: today });
+      void reload({ from: today, to: today });
     };
   const remove = async (student: Student) => {
       if (!window.confirm(`حذف ملف الطالب ${student.fullName} وكل سجلاته؟`)) return;
@@ -19359,7 +20593,7 @@ function StudentsListPanel({ data, mutate, setNotice, onOpenProfile }: { data: S
               </select>
             </label>
             <div className="student-filter-actions">
-              <button className="primary" onClick={apply}>
+              <button className="primary" disabled={searching} onClick={() => void apply()}>
                 ⌕ بحث
               </button>
               <button className="secondary" onClick={reset}>
@@ -19541,7 +20775,7 @@ function StudentsListPanel({ data, mutate, setNotice, onOpenProfile }: { data: S
   );
 }
 
-function StudentsModulePage({ view, data, currentUser, mutate, setNotice, initialProfileStudentId, onProfileClose }: { view: StudentView; data: Setup; currentUser: AuthEmployee; mutate: (payload: Record<string, unknown>) => Promise<void>; setNotice: (message: string) => void; initialProfileStudentId?: number | null; onProfileClose?: () => void }) {
+function StudentsModulePage({ view, data, currentUser, mutate, reload, setNotice, initialProfileStudentId, onProfileOpen, onProfileClose, initialStudentFilters = {}, onStudentFiltersChange = () => {} }: { view: StudentView; data: Setup; currentUser: AuthEmployee; mutate: (payload: Record<string, unknown>) => Promise<void>; reload: (query: Record<string, unknown>) => Promise<void>; setNotice: (message: string) => void; initialProfileStudentId?: string | null; onProfileOpen?: (studentId: number) => void; onProfileClose?: () => void; initialStudentFilters?: Record<string, string>; onStudentFiltersChange?: (filters: Record<string, string>) => void }) {
   const [query, setQuery] = useState(""),
     [studentFilter, setStudentFilter] = useState(""),
     [statusFilter, setStatusFilter] = useState(""),
@@ -19576,7 +20810,7 @@ function StudentsModulePage({ view, data, currentUser, mutate, setNotice, initia
     [complaintHistory, setComplaintHistory] = useState<StudentRecord | null>(null);
   useEffect(() => {
     if (view !== "studentsList" || !initialProfileStudentId) return;
-    const student = data.students.find((item) => item.id === initialProfileStudentId);
+    const student = data.students.find((item) => String(item.id) === initialProfileStudentId || phoneSearchValue(item.mobile) === phoneSearchValue(initialProfileStudentId));
     if (student) setProfileStudent(student);
   }, [view, initialProfileStudentId, data.students]);
   const setStudentEditor = (student: Student | null | undefined) => {
@@ -19599,8 +20833,12 @@ function StudentsModulePage({ view, data, currentUser, mutate, setNotice, initia
     });
   const students = data.students.filter((student) => {
     const date = localDateKey(student.createdAt),
-      filter = appliedStudentFilters;
-    return [student.fullName, student.mobile, student.secondaryMobile, student.email].join(" ").toLowerCase().includes(filter.query.toLowerCase()) && (!filter.dateFrom || date >= filter.dateFrom) && (!filter.dateTo || date <= filter.dateTo) && (!filter.status || student.status === filter.status) && (!filter.level || String(student.levelId) === filter.level) && (!filter.branch || String(student.branchId) === filter.branch);
+      filter = appliedStudentFilters,
+      query = filter.query.toLowerCase(),
+      phoneQuery = phoneSearchValue(filter.query),
+      textMatches = [student.fullName, student.mobile, student.secondaryMobile, student.email].join(" ").toLowerCase().includes(query),
+      phoneMatches = Boolean(phoneQuery) && [student.mobile, student.secondaryMobile].some((phone) => phoneSearchValue(phone).includes(phoneQuery));
+    return (textMatches || phoneMatches) && (!filter.dateFrom || date >= filter.dateFrom) && (!filter.dateTo || date <= filter.dateTo) && (!filter.status || student.status === filter.status) && (!filter.level || String(student.levelId) === filter.level) && (!filter.branch || String(student.branchId) === filter.branch);
   });
   const applyStudentFilters = () =>
     setAppliedStudentFilters({
@@ -19672,7 +20910,7 @@ function StudentsModulePage({ view, data, currentUser, mutate, setNotice, initia
         }}
       />
     );
-  if (view === "studentsList") return <StudentsListPanel data={data} mutate={mutate} setNotice={setNotice} onOpenProfile={setProfileStudent} />;
+  if (view === "studentsList") return <StudentsListPanel data={data} mutate={mutate} reload={reload} setNotice={setNotice} initialFilters={initialStudentFilters} onFiltersChange={onStudentFiltersChange} onOpenProfile={(student) => { setProfileStudent(student); onProfileOpen?.(student.id); }} />;
   if (view === "studentsList")
     return (
       <div className="content-stack students-module">
@@ -20564,7 +21802,7 @@ function AttendanceGroupsPage({ data, mutate, setNotice, canEditSessionNumber }:
         .filter((record) => record.studentId === studentId && record.kind === "payment")
         .reduce((sum, record) => {
           const details = studentRecordDetails(record);
-          return sum + (details.isMainPayment && !details.voided ? Math.max(0, Number(details.levels || 0) - Number(details.refundedLevels || 0)) : 0);
+          return sum + (details.isMainPayment && !details.voided ? Math.max(0, Number(details.levels || 0) - Number(details.refundedLevels || 0) - Number(details.transferredLevels || 0)) : 0);
         }, 0),
       student = data.students.find((item) => item.id === studentId),
       adjustment = student ? Number(studentDetails(student).misplacedLevelAdjustment || 0) : 0,
@@ -21038,7 +22276,7 @@ function StudentProfilePage({ student, data, mutate, setNotice, onBack }: { stud
       try {
         offerLevels = offer ? Number(JSON.parse(offer.customData || "{}").levels || 0) : 0;
       } catch {}
-      return total + Math.max(0, (Number(payment.levels ?? offerLevels) || 0) - Number(payment.refundedLevels || 0));
+      return total + Math.max(0, (Number(payment.levels ?? offerLevels) || 0) - Number(payment.refundedLevels || 0) - Number(payment.transferredLevels || 0));
     }, 0),
     levelAdjustment = Number(details.misplacedLevelAdjustment || 0),
     remainingLevels = Math.max(0, bookedLevels - memberships.length - levelAdjustment);
@@ -22437,8 +23675,8 @@ function TransferPaymentDialog({ type, record, details, data, mainPaidTotal, ava
       setBusy(false);
     }
   }
-  return (
-    <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+  const dialog = (
+    <div className="overlay transfer-payment-overlay" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form className="dialog compact transfer-payment-dialog" onSubmit={submit}>
         <div className="dialog-head">
           <div>
@@ -22511,6 +23749,7 @@ function TransferPaymentDialog({ type, record, details, data, mainPaidTotal, ava
       </form>
     </div>
   );
+  return typeof document === "undefined" ? null : createPortal(dialog, document.body);
 }
 
 function RefundPaymentDialog({ record, details, onClose, onSubmit }: { record: StudentRecord; details: Record<string, unknown>; onClose: () => void; onSubmit: (values: Record<string, unknown>) => Promise<void> }) {
@@ -23751,8 +24990,8 @@ function StudentRegistrationDialog({ student, data, onClose, onSubmit }: { stude
   const [values, setValues] = useState<Record<string, unknown>>({
       ...details,
       fullName: student?.fullName || "",
-      mobile: student?.mobile || "00",
-      secondaryMobile: student?.secondaryMobile || "00",
+      mobile: student?.mobile || "0020",
+      secondaryMobile: student?.secondaryMobile || "",
       email: student?.email || "",
       trackId: student?.trackId || "",
       levelId: student?.levelId || "",
@@ -23829,11 +25068,11 @@ function StudentRegistrationDialog({ student, data, onClose, onSubmit }: { stude
           </label>
           <label>
             <span>Mobile *</span>
-            <input required placeholder="00" value={String(values.mobile || "")} onChange={(event) => set("mobile", event.target.value)} />
+            <input required placeholder="0020" value={String(values.mobile || "")} onChange={(event) => set("mobile", event.target.value)} />
           </label>
           <label>
             <span>Mobile 2</span>
-            <input placeholder="00" value={String(values.secondaryMobile || "")} onChange={(event) => set("secondaryMobile", event.target.value)} />
+            <input placeholder="0020" value={String(values.secondaryMobile || "")} onChange={(event) => set("secondaryMobile", event.target.value)} />
           </label>
           <label>
             <span>FB Mobile</span>
@@ -25386,9 +26625,9 @@ function formatDate(value: string) {
   return formatEgyptDateTime(value);
 }
 function localDateKey(value: string | Date) {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = value instanceof Date ? value : systemDate(value);
   if (Number.isNaN(date.getTime())) return "";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return egyptDateKey(date);
 }
 function todayDateKey() {
   return localDateKey(new Date());

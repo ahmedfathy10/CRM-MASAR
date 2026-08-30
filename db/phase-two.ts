@@ -110,7 +110,10 @@ async function initialize() {
 
 export function normalizePhone(value: string) {
   let digits = value.replace(/\D/g, "");
-  if (digits.startsWith("0020")) digits = `0${digits.slice(4)}`;
-  if (digits.startsWith("20") && digits.length > 10) digits = `0${digits.slice(2)}`;
-  return digits;
+  if (!digits) return "";
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (/^0?1[0125]\d{8}$/.test(digits)) return `0020${digits.replace(/^0/, "")}`;
+  if (/^20(?:1[0125]\d{8}|[2-9]\d{7,9})$/.test(digits)) return `00${digits}`;
+  if (digits.startsWith("0")) return `0020${digits.slice(1)}`;
+  return `00${digits}`;
 }

@@ -114,11 +114,13 @@ test("uses the closest valid call before profile creation when no explicit link 
   assert.equal(callReceipt?.confidence,"High");
 });
 
-test("keeps empty months in both monthly charts",()=>{
+test("keeps empty months in both monthly charts and uses same-month channel share",()=>{
   const report=buildLeadsCallsAnalytics(input,filters);
   assert.deepEqual(report.leadMonths.map((row)=>row.month),["2026-05","2026-06","2026-07"]);
   assert.equal(report.leadMonths[0].paid,0);
   assert.equal(report.callMonths[2].receipts,0);
+  assert.equal(report.leadMonths[1].share,650*100/1050);
+  assert.equal(report.callMonths[1].share,400*100/1050);
 });
 
 test("infers receipt months when the offer period is open ended",()=>{
@@ -128,7 +130,34 @@ test("infers receipt months when the offer period is open ended",()=>{
   assert.deepEqual(report.leadMonths.map((row)=>row.month),["2026-06","2026-07"]);
   assert.equal(report.leadMonths[0].paid,650);
   assert.equal(report.leadMonths[1].paid,300);
-  assert.equal(report.leadMonths[0].share,650*100/950);
-  assert.equal(report.leadMonths[1].share,300*100/950);
-  assert.equal(report.leadMonths.reduce((sum,row)=>sum+row.share,0),100);
+  assert.equal(report.leadMonths[0].share,100);
+  assert.equal(report.leadMonths[1].share,100);
+});
+
+
+test("honors payment-level explicit links for New Comers attribution",()=>{
+  const explicitInput=structuredClone(input);
+  explicitInput.students.push({id:8,fullName:"Payment Linked",mobile:"01088888888",secondaryMobile:"",trackId:1,trackName:"English",branchId:1,branchName:"Maadi",customData:json({}),createdAt:"2026-06-07"});
+  explicitInput.leads.push({id:8,fullName:"Payment Linked Lead",primaryPhone:"01000000008",secondaryPhone:"",source:"Referral",campaign:"June",interest:"English",status:"contacted",finalStatus:"Not Yet",customData:json({}),assignedEmployeeId:1,assignedEmployee:"Mona",branchId:1,branchName:"Maadi",createdAt:"2026-06-01"});
+  explicitInput.studentRecords.push({id:80,studentId:8,studentName:"Payment Linked",kind:"payment",recordDate:"2026-06-08",status:"Paid",customData:json({main:"M-8",isMainPayment:true,levels:1,paymentType:"New Comer",total:1200,paid:600,leadId:8})});
+  explicitInput.studentRecords.push({id:81,studentId:8,studentName:"Payment Linked",kind:"payment",recordDate:"2026-06-20",status:"Paid",customData:json({main:"M-8",isMainPayment:false,paid:250,refunded:50,leadId:8})});
+  const report=buildLeadsCallsAnalytics(explicitInput,filters);
+  const rows=report.receipts.filter((row)=>row.studentId===8);
+  assert.equal(rows.length,2);
+  assert.equal(rows.reduce((sum,row)=>sum+row.paid,0),800);
+  assert.equal(rows.every((row)=>row.originType==="Lead"),true);
+  assert.equal(rows.every((row)=>row.matchMethod==="Explicit Link"),true);
+  assert.equal(report.mains.filter((main)=>main.record.studentId===8).length,1);
+});
+
+
+test("matches student mobile against lead secondary phone",()=>{
+  const secondaryInput=structuredClone(input);
+  secondaryInput.students.push({id:9,fullName:"Secondary Phone",mobile:"01099990000",secondaryMobile:"",trackId:1,trackName:"English",branchId:1,branchName:"Maadi",customData:json({}),createdAt:"2026-06-09"});
+  secondaryInput.leads.push({id:9,fullName:"Secondary Phone Lead",primaryPhone:"01000000009",secondaryPhone:"0020 10 9999 0000",source:"Google",campaign:"June",interest:"English",status:"contacted",finalStatus:"Not Yet",customData:json({}),assignedEmployeeId:1,assignedEmployee:"Mona",branchId:1,branchName:"Maadi",createdAt:"2026-06-04"});
+  secondaryInput.studentRecords.push({id:90,studentId:9,studentName:"Secondary Phone",kind:"payment",recordDate:"2026-06-09",status:"Paid",customData:json({main:"M-9",isMainPayment:true,levels:1,paymentType:"New Comer",total:700,paid:300})});
+  const report=buildLeadsCallsAnalytics(secondaryInput,filters);
+  const row=report.receipts.find((receipt)=>receipt.studentId===9);
+  assert.equal(row?.originType,"Lead");
+  assert.equal(row?.matchMethod,"Student Link");
 });

@@ -17,6 +17,7 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS settings_entities_kind_idx ON settings_entities (kind, title)`,
   `CREATE TABLE IF NOT EXISTS students (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, mobile TEXT NOT NULL DEFAULT '', level_id INTEGER NOT NULL REFERENCES settings_entities(id), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS students_level_idx ON students (level_id, full_name)`,
+  `CREATE INDEX IF NOT EXISTS students_created_at_idx ON students (created_at DESC)`,
   `CREATE TABLE IF NOT EXISTS student_records (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL REFERENCES students(id), kind TEXT NOT NULL, record_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, status TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', custom_data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
   `CREATE INDEX IF NOT EXISTS student_records_student_idx ON student_records (student_id, kind, record_date)`,
   `CREATE INDEX IF NOT EXISTS student_records_kind_date_idx ON student_records (kind, record_date)`,
